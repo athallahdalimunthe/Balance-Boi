@@ -20,7 +20,7 @@ export class Player extends Component {
   private gravity = -10;
   private alive = true;
   private score = 0;
-  private margin = 20; // extra margin in px outside canvas before dying
+  private margin = 200; // extra margin in px outside canvas before dying
 
   private rainbowColors: Color[] = [
     new Color(255, 0, 0),
@@ -82,9 +82,15 @@ if (retryBtn) {
 
     // a small squash & stretch to feel responsive
     tween(this.node)
-      .to(0.08, { scale: new Vec3(1.2, 0.8, 1) })
+      .to(0.08, { scale: new Vec3(0.2, 0.8, 1) })
       .to(0.08, { scale: new Vec3(1, 1, 1) })
       .start();
+
+// play flip sfx
+if (this.flipSfx && this.sfxSource) {
+  this.sfxSource.playOneShot(this.flipSfx, 1);
+}
+
 
     // small velocity bump for snappier feel (optional)
     if (this.body) {
@@ -102,8 +108,8 @@ if (retryBtn) {
       // pop animation
       this.scoreLabel.node.scale = new Vec3(1, 1, 1);
       tween(this.scoreLabel.node)
-        .to(0.1, { scale: new Vec3(1.4, 1.4, 1) })
-        .to(0.1, { scale: new Vec3(1, 1, 1) })
+        .to(0.1, { scale: new Vec3(2.4, 2.4, 2) })
+        .to(0.1, { scale: new Vec3(2, 3, 3) })
         .start();
 
       // rainbow color
@@ -136,26 +142,43 @@ if (retryBtn) {
     }
   }
 
-  gameOver() {
-    if (!this.alive) return;
-    this.alive = false;
-    this.unschedule(this.tickScore);
+gameOver() {
+  if (!this.alive) return;
+  this.alive = false;
+  this.unschedule(this.tickScore);
 
-    // show panel (your "RETRY??" label should be inside this panel)
-    if (this.gameOverPanel) this.gameOverPanel.active = true;
+  // ✅ play death sfx loudly to confirm
+  if (this.sfxSource && this.deathSfx) {
+    console.log("🔊 Playing death SFX"); // debug log
+    this.sfxSource.stop();               // stop any other sound on this source
+    this.sfxSource.playOneShot(this.deathSfx, 1);
+  }
 
-    // optional: small screen shake if you have a camera node called "Main Camera"
-    const cam = director.getScene()!.getChildByName('Main Camera');
-    if (cam) {
-      const originalPos = cam.position.clone();
-      tween(cam)
-        .to(0.05, { position: originalPos.add3f(10, 0, 0) })
-        .to(0.05, { position: originalPos.add3f(-20, 0, 0) })
-        .to(0.05, { position: originalPos.add3f(10, 0, 0) })
-        .to(0.05, { position: originalPos })
-        .start();
+  // show Game Over panel
+  if (this.gameOverPanel) this.gameOverPanel.active = true;
+
+  // optional: small camera shake
+  const cam = director.getScene()!.getChildByName('Main Camera');
+  if (cam) {
+    const originalPos = cam.position.clone();
+    tween(cam)
+      .to(0.05, { position: originalPos.add3f(10, 0, 0) })
+      .to(0.05, { position: originalPos.add3f(-20, 0, 0) })
+      .to(0.05, { position: originalPos.add3f(10, 0, 0) })
+      .to(0.05, { position: originalPos })
+      .start();
+  }
+
+  // ✅ stop background music if exists
+  const bgmNode = director.getScene()!.getChildByName("BGM");
+  if (bgmNode) {
+    const bgmSource = bgmNode.getComponent(AudioSource);
+    if (bgmSource && bgmSource.playing) {
+      bgmSource.stop();
+      console.log("⏹ BGM stopped");
     }
   }
+}
 
   // Called from Retry button (or from code)
   retry() {
