@@ -1,0 +1,24 @@
+import { _decorator, Component, Node, Vec3, tween } from 'cc';
+const { ccclass, property } = _decorator;
+
+@ccclass('PatternFloat')
+export class PatternFloat extends Component {
+    @property
+    floatHeight: number = 50;   // how high it floats up
+    @property
+    floatDuration: number = 2;  // time (seconds) to go up and down
+
+    start() {
+        // Save original position
+        const startPos = this.node.position;
+
+        // Create looping up & down tween
+        tween(this.node)
+            .repeatForever(
+                tween()
+                    .to(this.floatDuration, { position: new Vec3(startPos.x, startPos.y + this.floatHeight, startPos.z) }, { easing: 'smooth' })
+                    .to(this.floatDuration, { position: startPos }, { easing: 'smooth' })
+            )
+            .start();
+    }
+}
