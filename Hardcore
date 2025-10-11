@@ -1,7 +1,7 @@
 import {
   _decorator, Component, Node, RigidBody2D, Vec2,
   input, Input, EventKeyboard, KeyCode,
-  Label, director, tween, Vec3, Color, UITransform,AudioSource, AudioClip 
+  Label, director, tween, Vec3, Color, UITransform, AudioSource, AudioClip, Collider2D, Contact2DType, IPhysics2DContact
 } from 'cc';
 const { ccclass, property } = _decorator;
 
@@ -10,17 +10,22 @@ export class Player extends Component {
   @property(RigidBody2D) body!: RigidBody2D;
   @property(Label) scoreLabel!: Label;
   @property(Node) gameOverPanel!: Node;
-  /** optional: if your Canvas node has another name or isn't root, drag it here in Inspector */
   @property(Node) canvasNode: Node | null = null;
 
   @property(AudioSource) sfxSource: AudioSource = null!;
- @property(AudioClip) flipSfx: AudioClip = null!;
+  @property(AudioClip) flipSfx: AudioClip = null!;
   @property(AudioClip) deathSfx: AudioClip = null!;
+
+  // 🩸 NEW: Lives system
+  @property(Label) livesLabel: Label = null!;  // assign in editor
+  private lives: number = 100;
+  private drainPerObstacle: number = 10;
+  private healPerStar: number = 5;
 
   private gravity = -10;
   private alive = true;
   private score = 0;
-  private margin = 701; // extra margin in px outside canvas before dying
+  private margin = 701;
 
   private rainbowColors: Color[] = [
     new Color(255, 0, 0),
@@ -34,160 +39,168 @@ export class Player extends Component {
   private rainbowIndex = 0;
 
   onLoad() {
-    // input
     input.on(Input.EventType.TOUCH_START, this.flip, this);
     input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
-
-    // initial physics
     if (this.body) this.body.gravityScale = this.gravity;
-
-    // tick score every second
     this.schedule(this.tickScore, 1);
 
-    // hide panel at start
     if (this.gameOverPanel) this.gameOverPanel.active = false;
 
-// auto-bind Retry button
-const retryBtn = this.gameOverPanel?.getChildByName("RetryButton");
-if (retryBtn) {
-  const btnComp = retryBtn.getComponent('cc.Button');
-  if (btnComp) {
-    // listen to click
-    retryBtn.on(Node.EventType.MOUSE_DOWN, this.retry, this);
-    retryBtn.on(Node.EventType.TOUCH_END, this.retry, this); // works on mobile too
-  }
-}
+    const retryBtn = this.gameOverPanel?.getChildByName("RetryButton");
+    if (retryBtn) {
+      const btnComp = retryBtn.getComponent('cc.Button');
+      if (btnComp) {
+        retryBtn.on(Node.EventType.MOUSE_DOWN, this.retry, this);
+        retryBtn.on(Node.EventType.TOUCH_END, this.retry, this);
+      }
+    }
 
+    // 🩸 Init lives label
+    if (this.livesLabel) {
+      this.livesLabel.string = `❤️ ${this.lives}%`;
+    }
 
+    // 🧱 Detect collisions
+    const collider = this.getComponent(Collider2D);
+    if (collider) {
+      collider.on(Contact2DType.BEGIN_CONTACT, this.onBeginContact, this);
+    }
   }
 
   onDestroy() {
     input.off(Input.EventType.TOUCH_START, this.flip, this);
     input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
     this.unschedule(this.tickScore);
+
+    const collider = this.getComponent(Collider2D);
+    if (collider) collider.off(Contact2DType.BEGIN_CONTACT, this.onBeginContact, this);
   }
 
-  // debug key (press R in editor/play) to force game over
   private onKeyDown(ev: EventKeyboard) {
     if (ev.keyCode === KeyCode.KEY_R) {
       this.gameOver();
     }
   }
 
- flip() {
+  flip() {
     if (!this.alive) return;
-    // invert gravity
     this.gravity *= -1;
     if (this.body) this.body.gravityScale = this.gravity;
 
-// smaller default size
-    let baseScale = new Vec3(0.5, 0.5, 1);
-
-
-    // a small squash & stretch to feel responsive
     tween(this.node)
       .to(0.08, { scale: new Vec3(0.1, 0.8, 0.5) })
       .to(0.08, { scale: new Vec3(0.9, 0.9, 0.2) })
       .start();
 
+    if (this.flipSfx && this.sfxSource) {
+      this.sfxSource.playOneShot(this.flipSfx, 1);
+    }
 
-// play flip sfx
-if (this.flipSfx && this.sfxSource) {
-  this.sfxSource.playOneShot(this.flipSfx, 1);
-}
-
-
-    // small velocity bump for snappier feel (optional)
     if (this.body) {
       this.body.linearVelocity = new Vec2(0, this.gravity > 0 ? -6 : 7);
     }
   }
 
-  // score tick: rainbow + pop
   tickScore() {
     if (!this.alive) return;
     this.score++;
     if (this.scoreLabel) {
       this.scoreLabel.string = `${this.score}`;
-
-      // pop animation
       this.scoreLabel.node.scale = new Vec3(1, 1, 1);
       tween(this.scoreLabel.node)
         .to(0.1, { scale: new Vec3(2.4, 2.4, 2) })
         .to(0.1, { scale: new Vec3(2, 3, 3) })
         .start();
 
-      // rainbow color
       const col = this.rainbowColors[this.rainbowIndex];
       this.rainbowIndex = (this.rainbowIndex + 1) % this.rainbowColors.length;
       this.scoreLabel.color = col;
     }
+
+    // ⚡ Lives auto drain if not collecting stars (optional)
+    this.modifyLives(-1);
+  }
+
+  // 🩸 Handle collisions
+  private onBeginContact(selfCollider: Collider2D, otherCollider: Collider2D, contact: IPhysics2DContact | null) {
+    if (!this.alive) return;
+
+    const otherName = otherCollider.node.name.toLowerCase();
+
+    if (otherName.includes("obstacle")) {
+      this.modifyLives(-this.drainPerObstacle);
+      this.flashDamage();
+    } else if (otherName.includes("star")) {
+      this.modifyLives(this.healPerStar);
+      otherCollider.node.destroy(); // remove star
+    }
+  }
+
+  // 🩸 Modify lives with bounds
+  private modifyLives(amount: number) {
+    this.lives = Math.min(100, Math.max(0, this.lives + amount));
+    if (this.livesLabel) this.livesLabel.string = `❤️ ${this.lives}%`;
+    if (this.lives <= 0) this.gameOver();
+  }
+
+  // 🩸 Flash red effect
+  private flashDamage() {
+    tween(this.node)
+      .to(0.05, { scale: new Vec3(0.6, 0.6, 1) })
+      .to(0.05, { scale: new Vec3(1, 1, 1) })
+      .start();
   }
 
   update() {
     if (!this.alive) return;
 
-    // Get canvas node (use provided one or fallback to scene "Canvas")
     const canvas = this.canvasNode ?? director.getScene()!.getChildByName('Canvas');
     if (!canvas) return;
 
     const ui = canvas.getComponent(UITransform);
     if (!ui) return;
 
-    // UI coordinate: center is (0,0) for nodes under Canvas
     const halfH = ui.contentSize.height / 2;
-
-    // player's y (assuming player is child of Canvas). If player is NOT a child of Canvas,
-    // you can convert world->canvas space; for simplicity this assumes player is under Canvas.
     const y = this.node.position.y;
 
-    // if outside visible canvas bounds (top or bottom) -> die
     if (y > halfH + this.margin || y < -halfH - this.margin) {
       this.gameOver();
     }
   }
 
-gameOver() {
-  if (!this.alive) return;
-  this.alive = false;
-  this.unschedule(this.tickScore);
+  gameOver() {
+    if (!this.alive) return;
+    this.alive = false;
+    this.unschedule(this.tickScore);
 
-  // ✅ play death sfx loudly to confirm
-  if (this.sfxSource && this.deathSfx) {
-    console.log("🔊 Playing death SFX"); // debug log
-    this.sfxSource.stop();               // stop any other sound on this source
-    this.sfxSource.playOneShot(this.deathSfx, 1);
-  }
+    if (this.sfxSource && this.deathSfx) {
+      this.sfxSource.stop();
+      this.sfxSource.playOneShot(this.deathSfx, 1);
+    }
 
-  // show Game Over panel
-  if (this.gameOverPanel) this.gameOverPanel.active = true;
+    if (this.gameOverPanel) this.gameOverPanel.active = true;
 
-  // optional: small camera shake
-  const cam = director.getScene()!.getChildByName('Main Camera');
-  if (cam) {
-    const originalPos = cam.position.clone();
-    tween(cam)
-      .to(0.05, { position: originalPos.add3f(10, 0, 0) })
-      .to(0.05, { position: originalPos.add3f(-20, 0, 0) })
-      .to(0.05, { position: originalPos.add3f(10, 0, 0) })
-      .to(0.05, { position: originalPos })
-      .start();
-  }
+    const cam = director.getScene()!.getChildByName('Main Camera');
+    if (cam) {
+      const originalPos = cam.position.clone();
+      tween(cam)
+        .to(0.05, { position: originalPos.add3f(10, 0, 0) })
+        .to(0.05, { position: originalPos.add3f(-20, 0, 0) })
+        .to(0.05, { position: originalPos.add3f(10, 0, 0) })
+        .to(0.05, { position: originalPos })
+        .start();
+    }
 
-  // ✅ stop background music if exists
-  const bgmNode = director.getScene()!.getChildByName("BGM");
-  if (bgmNode) {
-    const bgmSource = bgmNode.getComponent(AudioSource);
-    if (bgmSource && bgmSource.playing) {
-      bgmSource.stop();
-      console.log("⏹ BGM stopped");
+    const bgmNode = director.getScene()!.getChildByName("BGM");
+    if (bgmNode) {
+      const bgmSource = bgmNode.getComponent(AudioSource);
+      if (bgmSource && bgmSource.playing) {
+        bgmSource.stop();
+      }
     }
   }
-}
 
-  // Called from Retry button (or from code)
   retry() {
-    console.log('🔄 Retry requested');
     director.loadScene(director.getScene()!.name!);
   }
 }
