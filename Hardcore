@@ -1,7 +1,7 @@
 import {
   _decorator, Component, Node, RigidBody2D, Vec2,
   input, Input, EventKeyboard, KeyCode,
-  Label, director, tween, Vec3, Color, UITransform, AudioSource, AudioClip, Collider2D, Contact2DType, IPhysics2DContact
+  Label, director, tween, Vec3, Color, UITransform, AudioSource, AudioClip, Collider2D, Contact2DType, IPhysics2DContact, Sprite
 } from 'cc';
 const { ccclass, property } = _decorator;
 
@@ -21,6 +21,9 @@ export class Player extends Component {
   private lives: number = 100;
   private drainPerObstacle: number = 10;
   private healPerStar: number = 5;
+
+  // 💚 NEW: Add Health variable (mirrors lives)
+  private health: number = 100;
 
   private gravity = -10;
   private alive = true;
@@ -132,6 +135,7 @@ export class Player extends Component {
       this.flashDamage();
     } else if (otherName.includes("star")) {
       this.modifyLives(this.healPerStar);
+      this.flashHeal();
       otherCollider.node.destroy(); // remove star
     }
   }
@@ -139,15 +143,39 @@ export class Player extends Component {
   // 🩸 Modify lives with bounds
   private modifyLives(amount: number) {
     this.lives = Math.min(100, Math.max(0, this.lives + amount));
+    this.health = this.lives; // 🔁 keep health synced
     if (this.livesLabel) this.livesLabel.string = `❤️ ${this.lives}%`;
     if (this.lives <= 0) this.gameOver();
   }
 
-  // 🩸 Flash red effect
+  // 🩸 Flash red effect on hit
   private flashDamage() {
+    const sprite = this.node.getComponent(Sprite);
+    if (!sprite) return;
+
+    const originalColor = sprite.color.clone();
+    sprite.color = new Color(255, 50, 50); // red
+    tween(sprite)
+      .delay(0.1)
+      .call(() => { sprite.color = originalColor; })
+      .start();
+
     tween(this.node)
       .to(0.05, { scale: new Vec3(0.6, 0.6, 1) })
       .to(0.05, { scale: new Vec3(1, 1, 1) })
+      .start();
+  }
+
+  // 💚 Flash green effect on heal
+  private flashHeal() {
+    const sprite = this.node.getComponent(Sprite);
+    if (!sprite) return;
+
+    const originalColor = sprite.color.clone();
+    sprite.color = new Color(50, 255, 50); // green
+    tween(sprite)
+      .delay(0.1)
+      .call(() => { sprite.color = originalColor; })
       .start();
   }
 
@@ -178,6 +206,7 @@ export class Player extends Component {
         if (dist < 80) { // adjust this based on sprite size
           if (name.includes("star")) {
             this.modifyLives(this.healPerStar);
+            this.flashHeal();
             node.destroy();
           } else if (name.includes("obstacle")) {
             this.modifyLives(-this.drainPerObstacle);
