@@ -109,7 +109,7 @@ export class Player extends Component {
       this.scoreLabel.node.scale = new Vec3(1, 1, 1);
       tween(this.scoreLabel.node)
         .to(0.1, { scale: new Vec3(2.4, 2.4, 2) })
-        .to(0.1, { scale: new Vec3(2, 3, 3) })
+        .to(0.1, { scale: new Vec3(4, 4, 4) })
         .start();
 
       const col = this.rainbowColors[this.rainbowIndex];
@@ -165,6 +165,26 @@ export class Player extends Component {
 
     if (y > halfH + this.margin || y < -halfH - this.margin) {
       this.gameOver();
+    }
+
+    // ⚡️ NEW: Proximity-based Star + Obstacle detection (backup to physics)
+    const scene = director.getScene();
+    if (!scene) return;
+    const allNodes = scene.children;
+    for (const node of allNodes) {
+      const name = node.name.toLowerCase();
+      if (name.includes("star") || name.includes("obstacle")) {
+        const dist = Vec3.distance(this.node.worldPosition, node.worldPosition);
+        if (dist < 80) { // adjust this based on sprite size
+          if (name.includes("star")) {
+            this.modifyLives(this.healPerStar);
+            node.destroy();
+          } else if (name.includes("obstacle")) {
+            this.modifyLives(-this.drainPerObstacle);
+            this.flashDamage();
+          }
+        }
+      }
     }
   }
 
