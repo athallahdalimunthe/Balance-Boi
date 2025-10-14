@@ -134,6 +134,7 @@ export class Player extends Component {
       this.modifyLives(-this.drainPerObstacle);
       this.flashDamage();
       this.showFloatingText("-" + this.drainPerObstacle, new Color(255, 80, 80)); // 🔴 popup
+      otherCollider.node.destroy(); // 💥 make obstacle disappear after hit
     } else if (otherName.includes("star")) {
       this.modifyLives(this.healPerStar);
       this.flashHeal();
@@ -235,6 +236,7 @@ export class Player extends Component {
             this.modifyLives(-this.drainPerObstacle);
             this.flashDamage();
             this.showFloatingText("-" + this.drainPerObstacle, new Color(255, 80, 80));
+            node.destroy(); // 💥 make obstacle disappear after proximity hit
           }
         }
       }
