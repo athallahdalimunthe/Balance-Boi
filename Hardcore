@@ -19,8 +19,8 @@ export class Player extends Component {
   // 🩸 NEW: Lives system
   @property(Label) livesLabel: Label = null!;  // assign in editor
   private lives: number = 100;
-  private drainPerObstacle: number = 10;
-  private healPerStar: number = 5;
+  private drainPerObstacle: number = 1;
+  private healPerStar: number = 15;
 
   // 💚 NEW: Add Health variable (mirrors lives)
   private health: number = 100;
@@ -133,9 +133,11 @@ export class Player extends Component {
     if (otherName.includes("obstacle")) {
       this.modifyLives(-this.drainPerObstacle);
       this.flashDamage();
+      this.showFloatingText("-" + this.drainPerObstacle, new Color(255, 80, 80)); // 🔴 popup
     } else if (otherName.includes("star")) {
       this.modifyLives(this.healPerStar);
       this.flashHeal();
+      this.showFloatingText("+" + this.healPerStar, new Color(300, 255, 100)); // 🟢 popup
       otherCollider.node.destroy(); // remove star
     }
   }
@@ -179,6 +181,26 @@ export class Player extends Component {
       .start();
   }
 
+  // 🌟 Floating text popup
+  private showFloatingText(text: string, color: Color) {
+    const canvas = this.canvasNode ?? director.getScene()!.getChildByName('Canvas');
+    if (!canvas) return;
+
+    const popup = new Node("PopupText");
+    const label = popup.addComponent(Label);
+    label.string = text;
+    label.color = color;
+    label.fontSize = 28;
+    popup.setPosition(this.node.worldPosition);
+    canvas.addChild(popup);
+
+    tween(popup)
+      .by(0.6, { position: new Vec3(0, 70, 0) })
+      .to(0.2, { scale: new Vec3(0, 0, 0) })
+      .call(() => popup.destroy())
+      .start();
+  }
+
   update() {
     if (!this.alive) return;
 
@@ -207,10 +229,12 @@ export class Player extends Component {
           if (name.includes("star")) {
             this.modifyLives(this.healPerStar);
             this.flashHeal();
+            this.showFloatingText("+" + this.healPerStar, new Color(100, 255, 100));
             node.destroy();
           } else if (name.includes("obstacle")) {
             this.modifyLives(-this.drainPerObstacle);
             this.flashDamage();
+            this.showFloatingText("-" + this.drainPerObstacle, new Color(255, 80, 80));
           }
         }
       }
