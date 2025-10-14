@@ -1,0 +1,54 @@
+import { _decorator, Component, Prefab, Node, instantiate, Vec3, tween, math } from 'cc';
+const { ccclass, property } = _decorator;
+
+@ccclass('Spawner')
+export class Spawner extends Component {
+    @property(Prefab)
+    starPrefab: Prefab = null!;
+
+    @property(Prefab)
+    obstaclePrefab: Prefab = null!;
+
+    @property(Node)
+    canvas: Node = null!; // Parent node to add spawned objects under
+
+    start() {
+        // Start infinite spawning loops
+        this.schedule(this.spawnStar, 3); // every 3 seconds
+        this.schedule(this.spawnObstacle, 4); // every 4 seconds
+    }
+
+    spawnStar() {
+        this.spawnObject(this.starPrefab, true);
+    }
+
+    spawnObstacle() {
+        this.spawnObject(this.obstaclePrefab, false);
+    }
+
+    spawnObject(prefab: Prefab, isStar: boolean) {
+        const newObj = instantiate(prefab);
+        this.canvas.addChild(newObj);
+
+        // Random X position (within screen width range)
+        const randX = math.randomRange(-200, 200);
+        newObj.setPosition(randX, 400, 0);
+
+        // Movement (left-right loop)
+        const moveDistance = math.randomRange(50, 150);
+        const duration = math.randomRange(1, 2);
+
+        tween(newObj)
+            .repeatForever(
+                tween()
+                    .to(duration, { position: new Vec3(randX + moveDistance, newObj.position.y, 0) })
+                    .to(duration, { position: new Vec3(randX - moveDistance, newObj.position.y, 0) })
+            )
+            .start();
+
+        // Optional: Destroy if off-screen
+        this.scheduleOnce(() => {
+            if (newObj && newObj.isValid) newObj.destroy();
+        }, 10); // Destroy after 10 seconds
+    }
+}
