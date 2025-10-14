@@ -1,54 +1,79 @@
-import { _decorator, Component, Prefab, Node, instantiate, Vec3, tween, math } from 'cc';
+import { _decorator, Component, Prefab, Node, instantiate, Vec3, tween, math, director, UITransform } from 'cc';
 const { ccclass, property } = _decorator;
 
 @ccclass('Spawner')
 export class Spawner extends Component {
-    @property(Prefab)
-    starPrefab: Prefab = null!;
+  @property(Prefab) starPrefab: Prefab = null!;
+  @property(Prefab) obstaclePrefab: Prefab = null!;
+  @property(Node) canvas: Node | null = null!; // optional - can be left unset
 
-    @property(Prefab)
-    obstaclePrefab: Prefab = null!;
-
-    @property(Node)
-    canvas: Node = null!; // Parent node to add spawned objects under
-
-    start() {
-        // Start infinite spawning loops
-        this.schedule(this.spawnStar, 3); // every 3 seconds
-        this.schedule(this.spawnObstacle, 4); // every 4 seconds
+  start() {
+    // try to auto-find canvas if not assigned
+    if (!this.canvas) {
+      const scene = director.getScene();
+      if (scene) {
+        const found = scene.getChildByName('Canvas') || scene.getChildByName('canvas');
+        this.canvas = found || scene;
+        console.log('[Spawner] auto-selected canvas:', this.canvas?.name);
+      }
     }
 
-    spawnStar() {
-        this.spawnObject(this.starPrefab, true);
+    // sanity checks & warnings
+    if (!this.starPrefab) console.warn('[Spawner] starPrefab not assigned!');
+    if (!this.obstaclePrefab) console.warn('[Spawner] obstaclePrefab not assigned!');
+    if (!this.canvas) console.warn('[Spawner] canvas not found! spawned objects will be added to scene root.');
+
+    // spawn loops (tweak intervals)
+    this.schedule(this.spawnStar, 2.5);
+    this.schedule(this.spawnObstacle, 3.8);
+  }
+
+  spawnStar = () => {
+    if (!this.starPrefab) return;
+    this.spawnObject(this.starPrefab, true);
+  };
+
+  spawnObstacle = () => {
+    if (!this.obstaclePrefab) return;
+    this.spawnObject(this.obstaclePrefab, false);
+  };
+
+  spawnObject(prefab: Prefab, isStar: boolean) {
+    const newObj = instantiate(prefab);
+    // choose parent: canvas if available, otherwise scene root
+    const parent = this.canvas ?? director.getScene();
+    if (!parent) {
+      console.error('[Spawner] no parent found to attach spawned object');
+      return;
     }
 
-    spawnObstacle() {
-        this.spawnObject(this.obstaclePrefab, false);
+    parent.addChild(newObj);
+
+    // position: top of screen with random X using UITransform if available
+    let randX = math.randomRange(-200, 200);
+    // if parent has UITransform (a Canvas), use its width to bound spawn pos
+    const ui = parent.getComponent(UITransform);
+    if (ui) {
+      randX = math.randomRange(-ui.contentSize.width/2 + 50, ui.contentSize.width/2 - 50);
+      newObj.setPosition(randX, ui.contentSize.height/2 + 80, 0);
+    } else {
+      newObj.setPosition(randX, 400, 0);
     }
 
-    spawnObject(prefab: Prefab, isStar: boolean) {
-        const newObj = instantiate(prefab);
-        this.canvas.addChild(newObj);
+    // horizontal ping-pong movement
+    const moveDistance = math.randomRange(500, 180);
+    const duration = math.randomRange(1.0, 2.2);
+    tween(newObj)
+      .repeatForever(
+        tween()
+          .to(duration, { position: new Vec3(newObj.position.x + moveDistance, newObj.position.y, 0) })
+          .to(duration, { position: new Vec3(newObj.position.x - moveDistance, newObj.position.y, 0) })
+      )
+      .start();
 
-        // Random X position (within screen width range)
-        const randX = math.randomRange(-200, 200);
-        newObj.setPosition(randX, 400, 0);
-
-        // Movement (left-right loop)
-        const moveDistance = math.randomRange(50, 150);
-        const duration = math.randomRange(1, 2);
-
-        tween(newObj)
-            .repeatForever(
-                tween()
-                    .to(duration, { position: new Vec3(randX + moveDistance, newObj.position.y, 0) })
-                    .to(duration, { position: new Vec3(randX - moveDistance, newObj.position.y, 0) })
-            )
-            .start();
-
-        // Optional: Destroy if off-screen
-        this.scheduleOnce(() => {
-            if (newObj && newObj.isValid) newObj.destroy();
-        }, 10); // Destroy after 10 seconds
-    }
+    // destroy automatically after X seconds to avoid clutter
+    this.scheduleOnce(() => {
+      if (newObj && newObj.isValid) newObj.destroy();
+    }, 12);
+  }
 }
