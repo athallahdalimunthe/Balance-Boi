@@ -1,0 +1,94 @@
+import {
+  _decorator,
+  Component,
+  Node,
+  Sprite,
+  Button,
+  SpriteFrame,
+  Label,
+  tween,
+  Vec3,
+  director,
+  UIOpacity,
+} from 'cc';
+import { SkinManager } from './SkinManager';
+const { ccclass, property } = _decorator;
+
+@ccclass('SkinSelector')
+export class SkinSelector extends Component {
+  @property([Node]) skinButtons: Node[] = [];
+  @property(Label) equippedLabel: Label | null = null!;
+  @property(Node) backButton: Node | null = null!;
+
+  start() {
+    // Hide notification label initially
+    if (this.equippedLabel) {
+      const n = this.equippedLabel.node;
+      const opacity = n.getComponent(UIOpacity) || n.addComponent(UIOpacity);
+      opacity.opacity = 0;
+      n.active = false;
+    }
+
+    // Add click listeners for each skin button
+    for (const skin of this.skinButtons) {
+      const button = skin.getComponent(Button);
+      const sprite = skin.getComponent(Sprite);
+
+      if (button && sprite) {
+        button.node.on(Button.EventType.CLICK, () => {
+          // Save selected skin globally
+          SkinManager.setSkin(sprite.spriteFrame as SpriteFrame);
+
+          // Show “Skin Equipped” label
+          this.showEquippedLabel();
+
+          // Small click animation (scale down slightly then back)
+          skin.setScale(new Vec3(0.9, 0.9, 1));
+          tween(skin)
+            .to(0.1, { scale: new Vec3(1, 1, 1) })
+            .start();
+        });
+      }
+    }
+
+    // Back button to return to main menu
+    if (this.backButton) {
+      const btn = this.backButton.getComponent(Button);
+      if (btn) {
+        this.backButton.on(Button.EventType.CLICK, () => {
+          // ✅ Change this to your actual menu scene name
+          director.loadScene('StartMenu');
+        });
+      }
+    }
+  }
+
+  showEquippedLabel() {
+    if (!this.equippedLabel) return;
+
+    const node = this.equippedLabel.node;
+    node.active = true;
+
+    // Use UIOpacity for fading
+    const opacity = node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
+    opacity.opacity = 255;
+
+    // Set initial scale and fade-in animation
+    node.setScale(new Vec3(1, 1, 1));
+
+    tween(node)
+      .to(0.2, { scale: new Vec3(1.05, 1.05, 1) })
+      .delay(2) // keep visible for 2 seconds
+      .to(0.5, { scale: new Vec3(1, 1, 1) })
+      .call(() => {
+        // Fade out
+        tween(opacity)
+          .to(0.5, { opacity: 0 })
+          .call(() => {
+            node.active = false;
+          })
+          .start();
+      })
+      .start();
+  }
+}
