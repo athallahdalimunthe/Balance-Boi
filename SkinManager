@@ -1,0 +1,25 @@
+import { _decorator, Component, director, SpriteFrame } from 'cc';
+const { ccclass } = _decorator;
+
+@ccclass('SkinManager')
+export class SkinManager extends Component {
+  private static _instance: SkinManager | null = null;
+  public static selectedSkin: SpriteFrame | null = null;
+
+  onLoad() {
+    if (SkinManager._instance) {
+      this.destroy();
+      return;
+    }
+    SkinManager._instance = this;
+    director.addPersistRootNode(this.node); // keep between scenes
+  }
+
+  static setSkin(spriteFrame: SpriteFrame) {
+    SkinManager.selectedSkin = spriteFrame;
+  }
+
+  static getSkin(): SpriteFrame | null {
+    return SkinManager.selectedSkin;
+  }
+}
