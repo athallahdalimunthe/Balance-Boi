@@ -74,12 +74,12 @@ export class SkinSelector extends Component {
     opacity.opacity = 255;
 
     // Set initial scale and fade-in animation
-    node.setScale(new Vec3(1, 1, 1));
+    node.setScale(new Vec3(5, 5, 1));
 
     tween(node)
-      .to(0.2, { scale: new Vec3(1.05, 1.05, 1) })
-      .delay(2) // keep visible for 2 seconds
-      .to(0.5, { scale: new Vec3(1, 1, 1) })
+      .to(0.2, { scale: new Vec3(3.05, 3.05, 1) })
+      .delay(4) // keep visible for 2 seconds
+      .to(0.5, { scale: new Vec3(5, 3.9, 1) })
       .call(() => {
         // Fade out
         tween(opacity)
