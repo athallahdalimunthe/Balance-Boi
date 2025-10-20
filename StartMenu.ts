@@ -8,12 +8,13 @@ export class StartMenu extends Component {
     playButton: Button = null!;
 
     @property(Button)
-    hardcoreButton: Button = null!;   // <-- new Hardcore button
+    hardcoreButton: Button = null!;
 
     @property(Button)
-    oppButton: Button = null!; 
+    oppButton: Button = null!;
 
-    
+    @property(Button)
+    skinButton: Button = null!;   // ✅ New Skin button reference
 
     start() {
         // Connect Play button
@@ -22,24 +23,29 @@ export class StartMenu extends Component {
         // Connect Hardcore button
         this.hardcoreButton.node.on(Button.EventType.CLICK, this.onHardcore, this);
 
-        
+        // Connect OPP button
         this.oppButton.node.on(Button.EventType.CLICK, this.onOpp, this);
 
-        
+        // ✅ Connect Skin button
+        if (this.skinButton) {
+            this.skinButton.node.on(Button.EventType.CLICK, this.onSkin, this);
+        }
     }
 
     onPlay() {
-        // Load the main game scene
         director.loadScene("GAME");
     }
 
     onHardcore() {
-        // Load the Hardcore scene
         director.loadScene("HARDCORE");
     }
 
     onOpp() {
-
         director.loadScene("OPP");
+    }
+
+    // ✅ New function for Skin Scene
+    onSkin() {
+        director.loadScene("SKIN");   // Make sure your Skin scene name matches exactly
     }
 }
