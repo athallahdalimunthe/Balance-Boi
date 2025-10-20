@@ -20,7 +20,7 @@ export class Player extends Component {
   private gravity = -10;
   private alive = true;
   private score = 0;
-  private margin = 200; // extra margin in px outside canvas before dying
+  private margin = 288; // extra margin in px outside canvas before dying
 
   private rainbowColors: Color[] = [
     new Color(255, 0, 0),
@@ -74,17 +74,22 @@ if (retryBtn) {
     }
   }
 
-  flip() {
+ flip() {
     if (!this.alive) return;
     // invert gravity
     this.gravity *= -1;
     if (this.body) this.body.gravityScale = this.gravity;
 
+// smaller default size
+    let baseScale = new Vec3(0.5, 0.5, 1);
+
+
     // a small squash & stretch to feel responsive
     tween(this.node)
-      .to(0.08, { scale: new Vec3(0.2, 0.8, 1) })
-      .to(0.08, { scale: new Vec3(1, 1, 1) })
+      .to(0.08, { scale: new Vec3(0.1, 0.3, 0.5) })
+      .to(0.08, { scale: new Vec3(0.3, 0.3, 0.2) })
       .start();
+
 
 // play flip sfx
 if (this.flipSfx && this.sfxSource) {
