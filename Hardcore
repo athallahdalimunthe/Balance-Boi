@@ -1,7 +1,8 @@
 import {
   _decorator, Component, Node, RigidBody2D, Vec2,
   input, Input, EventKeyboard, KeyCode,
-  Label, director, tween, Vec3, Color, UITransform, AudioSource, AudioClip, Collider2D, Contact2DType, IPhysics2DContact, Sprite
+  Label, director, tween, Vec3, Color, UITransform,
+  AudioSource, AudioClip, Collider2D, Contact2DType, IPhysics2DContact, Sprite, sys // 🆕 added sys
 } from 'cc';
 const { ccclass, property } = _decorator;
 
@@ -16,13 +17,10 @@ export class Player extends Component {
   @property(AudioClip) flipSfx: AudioClip = null!;
   @property(AudioClip) deathSfx: AudioClip = null!;
 
-  // 🩸 NEW: Lives system
-  @property(Label) livesLabel: Label = null!;  // assign in editor
+  @property(Label) livesLabel: Label = null!;
   private lives: number = 100;
   private drainPerObstacle: number = 1;
   private healPerStar: number = 15;
-
-  // 💚 NEW: Add Health variable (mirrors lives)
   private health: number = 100;
 
   private gravity = -10;
@@ -58,12 +56,10 @@ export class Player extends Component {
       }
     }
 
-    // 🩸 Init lives label
     if (this.livesLabel) {
       this.livesLabel.string = `❤️ ${this.lives}%`;
     }
 
-    // 🧱 Detect collisions
     const collider = this.getComponent(Collider2D);
     if (collider) {
       collider.on(Contact2DType.BEGIN_CONTACT, this.onBeginContact, this);
@@ -120,11 +116,9 @@ export class Player extends Component {
       this.scoreLabel.color = col;
     }
 
-    // ⚡ Lives auto drain if not collecting stars (optional)
     this.modifyLives(-1);
   }
 
-  // 🩸 Handle collisions
   private onBeginContact(selfCollider: Collider2D, otherCollider: Collider2D, contact: IPhysics2DContact | null) {
     if (!this.alive) return;
 
@@ -133,31 +127,29 @@ export class Player extends Component {
     if (otherName.includes("obstacle")) {
       this.modifyLives(-this.drainPerObstacle);
       this.flashDamage();
-      this.showFloatingText("-" + this.drainPerObstacle, new Color(255, 80, 80)); // 🔴 popup
-      otherCollider.node.destroy(); // 💥 make obstacle disappear after hit
+      this.showFloatingText("-" + this.drainPerObstacle, new Color(255, 80, 80));
+      otherCollider.node.destroy();
     } else if (otherName.includes("star")) {
       this.modifyLives(this.healPerStar);
       this.flashHeal();
-      this.showFloatingText("+" + this.healPerStar, new Color(300, 255, 100)); // 🟢 popup
-      otherCollider.node.destroy(); // remove star
+      this.showFloatingText("+" + this.healPerStar, new Color(300, 255, 100));
+      otherCollider.node.destroy();
     }
   }
 
-  // 🩸 Modify lives with bounds
   private modifyLives(amount: number) {
     this.lives = Math.min(100, Math.max(0, this.lives + amount));
-    this.health = this.lives; // 🔁 keep health synced
+    this.health = this.lives;
     if (this.livesLabel) this.livesLabel.string = `❤️ ${this.lives}%`;
     if (this.lives <= 0) this.gameOver();
   }
 
-  // 🩸 Flash red effect on hit
   private flashDamage() {
     const sprite = this.node.getComponent(Sprite);
     if (!sprite) return;
 
     const originalColor = sprite.color.clone();
-    sprite.color = new Color(255, 50, 50); // red
+    sprite.color = new Color(255, 50, 50);
     tween(sprite)
       .delay(0.1)
       .call(() => { sprite.color = originalColor; })
@@ -169,20 +161,18 @@ export class Player extends Component {
       .start();
   }
 
-  // 💚 Flash green effect on heal
   private flashHeal() {
     const sprite = this.node.getComponent(Sprite);
     if (!sprite) return;
 
     const originalColor = sprite.color.clone();
-    sprite.color = new Color(50, 255, 50); // green
+    sprite.color = new Color(50, 255, 50);
     tween(sprite)
       .delay(0.1)
       .call(() => { sprite.color = originalColor; })
       .start();
   }
 
-  // 🌟 Floating text popup
   private showFloatingText(text: string, color: Color) {
     const canvas = this.canvasNode ?? director.getScene()!.getChildByName('Canvas');
     if (!canvas) return;
@@ -218,7 +208,6 @@ export class Player extends Component {
       this.gameOver();
     }
 
-    // ⚡️ NEW: Proximity-based Star + Obstacle detection (backup to physics)
     const scene = director.getScene();
     if (!scene) return;
     const allNodes = scene.children;
@@ -226,7 +215,7 @@ export class Player extends Component {
       const name = node.name.toLowerCase();
       if (name.includes("star") || name.includes("obstacle")) {
         const dist = Vec3.distance(this.node.worldPosition, node.worldPosition);
-        if (dist < 80) { // adjust this based on sprite size
+        if (dist < 80) {
           if (name.includes("star")) {
             this.modifyLives(this.healPerStar);
             this.flashHeal();
@@ -236,7 +225,7 @@ export class Player extends Component {
             this.modifyLives(-this.drainPerObstacle);
             this.flashDamage();
             this.showFloatingText("-" + this.drainPerObstacle, new Color(255, 80, 80));
-            node.destroy(); // 💥 make obstacle disappear after proximity hit
+            node.destroy();
           }
         }
       }
@@ -273,9 +262,36 @@ export class Player extends Component {
         bgmSource.stop();
       }
     }
+
+    // 🆕 Save OPP progress
+    this.saveProgress();
+
+// 🏁 Save best score (only for OPP mode)
+const bestOpp = parseInt(localStorage.getItem("bestOppScore") || "0");
+if (this.score > bestOpp) {
+    localStorage.setItem("bestOppScore", this.score.toString());
+}
+
+
+
+
   }
 
   retry() {
     director.loadScene(director.getScene()!.name!);
+  }
+
+  // 🆕 Save highscore for OPP mode
+  private saveProgress() {
+    const key = "opp_highscore";
+    const prev = sys.localStorage.getItem(key);
+    const prevScore = prev ? parseInt(prev) : 0;
+
+    if (this.score > prevScore) {
+      sys.localStorage.setItem(key, this.score.toString());
+      console.log(`🏆 New OPP High Score: ${this.score}`);
+    } else {
+      console.log(`ℹ️ Score (${this.score}) not higher than previous (${prevScore})`);
+    }
   }
 }
