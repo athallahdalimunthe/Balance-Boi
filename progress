@@ -1,0 +1,31 @@
+import { _decorator, Component, Label, Button, director } from 'cc';
+const { ccclass, property } = _decorator;
+
+@ccclass('Progress')
+export class Progress extends Component {
+
+    @property(Label)
+    gameBestLabel: Label = null!;
+
+    @property(Label)
+    oppBestLabel: Label = null!;
+
+    @property(Button)
+    backButton: Button = null!;  // to return to StartMenu
+
+    start() {
+        // 🧩 Load saved scores
+        const bestGame = localStorage.getItem("bestGameScore") || "0";
+        const bestOpp = localStorage.getItem("bestOppScore") || "0";
+
+        this.gameBestLabel.string = `Normal Best Score: ${bestGame}`;
+        this.oppBestLabel.string = `Hardcore Best Score: ${bestOpp}`;
+
+        // 🎯 Back button returns to StartMenu
+        if (this.backButton) {
+            this.backButton.node.on(Button.EventType.CLICK, () => {
+                director.loadScene("StartMenu");
+            });
+        }
+    }
+}
