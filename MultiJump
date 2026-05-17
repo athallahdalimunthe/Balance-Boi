@@ -1,0 +1,274 @@
+-- ============================================================
+--  MultiJump LocalScript  (Balance Boi)
+--  Place inside: StarterCharacterScripts
+-- ============================================================
+--  • Up to 5 jumps (configurable)
+--  • Works on PC (Spacebar) AND Mobile (jump button)
+--  • Visual effects per jump: ring burst, screen flash, particles
+--  • Juice: camera shake, sound, color-coded jump indicator
+-- ============================================================
+
+-- ╔══════════════════════════════════════════╗
+-- ║              CONFIGURATION               ║
+-- ╚══════════════════════════════════════════╝
+
+local CONFIG = {
+	MaxJumps       = 5,       -- total jumps allowed before landing
+	JumpPower      = 55,      -- base jump power (tweak to feel right)
+	ExtraJumpPower = 50,      -- power for jumps 2-5 (slightly less = natural feel)
+
+	-- Sound IDs for each jump (put your own, or leave default Roblox ones)
+	JumpSounds = {
+		[1] = "rbxassetid://138229615195433",  -- first jump
+		[2] = "rbxassetid://138074730724614",  -- double jump
+		[3] = "rbxassetid://135765176177848",
+		[4] = "rbxassetid://138963217663286",
+		[5] = "rbxassetid://1884211021",
+	},
+
+	-- Ring burst image (BillboardGui) — put your MLG circle/ring asset ID
+	RingImageId = "rbxassetid://YOUR_RING_IMAGE_ID",
+
+	-- Color of the ring per jump number
+	JumpColors = {
+		[1] = Color3.fromRGB(255, 255, 255),   -- white
+		[2] = Color3.fromRGB(100, 220, 255),   -- blue
+		[3] = Color3.fromRGB(120, 255, 120),   -- green
+		[4] = Color3.fromRGB(255, 200,  60),   -- gold
+		[5] = Color3.fromRGB(255,  80, 200),   -- PINK MLG MAX JUMP
+	},
+
+	CameraShakeAmount = 0.18,  -- how much camera shakes on each extra jump
+}
+
+-- ╔══════════════════════════════════════════╗
+-- ║               SERVICES                   ║
+-- ╚══════════════════════════════════════════╝
+
+local Players         = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService    = game:GetService("TweenService")
+local RunService      = game:GetService("RunService")
+
+local Player          = Players.LocalPlayer
+local Camera          = workspace.CurrentCamera
+
+-- ╔══════════════════════════════════════════╗
+-- ║               SETUP                      ║
+-- ╚══════════════════════════════════════════╝
+
+local Character   = script.Parent
+local Humanoid    = Character:WaitForChild("Humanoid")
+local HRP         = Character:WaitForChild("HumanoidRootPart")
+local Animator    = Humanoid:WaitForChild("Animator")
+
+local jumpsLeft   = CONFIG.MaxJumps
+local isGrounded  = true
+local jumpCooldown = false
+
+-- ╔══════════════════════════════════════════╗
+-- ║         SOUND SETUP                      ║
+-- ╚══════════════════════════════════════════╝
+
+local sounds = {}
+for i = 1, CONFIG.MaxJumps do
+	local s      = Instance.new("Sound")
+	s.SoundId    = CONFIG.JumpSounds[i] or "rbxassetid://0"
+	s.Volume     = 0.6
+	s.RollOffMaxDistance = 60
+	s.Parent     = HRP
+	sounds[i]    = s
+end
+
+-- ╔══════════════════════════════════════════╗
+-- ║         GROUND DETECTION                 ║
+-- ╚══════════════════════════════════════════╝
+
+Humanoid.StateChanged:Connect(function(_, new)
+	if new == Enum.HumanoidStateType.Landed
+		or new == Enum.HumanoidStateType.Running
+		or new == Enum.HumanoidStateType.RunningNoPhysics then
+		jumpsLeft  = CONFIG.MaxJumps
+		isGrounded = true
+		-- Tell the GUI to reset
+		local gui = Player.PlayerGui:FindFirstChild("GameplayGUI")
+		if gui then
+			local ev = gui:FindFirstChild("JumpUpdate")
+			if ev then ev:Fire(jumpsLeft, CONFIG.MaxJumps) end
+		end
+	elseif new == Enum.HumanoidStateType.Freefall
+		or     new == Enum.HumanoidStateType.Jumping then
+		isGrounded = false
+	end
+end)
+
+-- ╔══════════════════════════════════════════╗
+-- ║         RING BURST EFFECT                ║
+-- ╚══════════════════════════════════════════╝
+
+local function spawnRing(jumpIndex)
+	local color = CONFIG.JumpColors[jumpIndex] or Color3.new(1,1,1)
+
+	-- BillboardGui ring centered on feet
+	local attachment = Instance.new("Attachment")
+	attachment.Position = Vector3.new(0, -2.5, 0)
+	attachment.Parent   = HRP
+
+	local bb            = Instance.new("BillboardGui")
+	bb.Size             = UDim2.new(0, 10, 0, 10)
+	bb.StudsOffset      = Vector3.new(0, 0, 0)
+	bb.AlwaysOnTop      = false
+	bb.Adornee          = attachment
+	bb.Parent           = workspace
+
+	local img           = Instance.new("ImageLabel")
+	img.Size            = UDim2.new(1, 0, 1, 0)
+	img.BackgroundTransparency = 1
+	img.Image           = CONFIG.RingImageId
+	img.ImageColor3     = color
+	img.ImageTransparency = 0
+	img.Parent          = bb
+
+	-- Tween: expand and fade
+	TweenService:Create(bb,
+		TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Size = UDim2.new(0, 60, 0, 60) }
+	):Play()
+	TweenService:Create(img,
+		TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ ImageTransparency = 1 }
+	):Play()
+
+	game:GetService("Debris"):AddItem(bb, 0.5)
+	game:GetService("Debris"):AddItem(attachment, 0.5)
+end
+
+-- ╔══════════════════════════════════════════╗
+-- ║         CAMERA SHAKE                     ║
+-- ╚══════════════════════════════════════════╝
+
+local shakeTime = 0
+local shakeMag  = 0
+
+RunService.RenderStepped:Connect(function(dt)
+	if shakeTime > 0 then
+		shakeTime = shakeTime - dt
+		local offset = Vector3.new(
+			math.random(-100,100)/100 * shakeMag,
+			math.random(-100,100)/100 * shakeMag,
+			0
+		)
+		Camera.CFrame = Camera.CFrame * CFrame.new(offset)
+	end
+end)
+
+local function shakeCamera(mag, duration)
+	shakeMag  = mag
+	shakeTime = duration
+end
+
+-- ╔══════════════════════════════════════════╗
+-- ║         SCREEN FLASH                     ║
+-- ╚══════════════════════════════════════════╝
+
+local flashGui       = Instance.new("ScreenGui")
+flashGui.Name        = "JumpFlash"
+flashGui.ResetOnSpawn = false
+flashGui.IgnoreGuiInset = true
+flashGui.Parent      = Player.PlayerGui
+
+local flashFrame     = Instance.new("Frame")
+flashFrame.Size      = UDim2.new(1,0,1,0)
+flashFrame.BackgroundColor3 = Color3.new(1,1,1)
+flashFrame.BackgroundTransparency = 1
+flashFrame.BorderSizePixel = 0
+flashFrame.Parent    = flashGui
+
+local function screenFlash(color)
+	flashFrame.BackgroundColor3 = color
+	flashFrame.BackgroundTransparency = 0.6
+	TweenService:Create(flashFrame,
+		TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ BackgroundTransparency = 1 }
+	):Play()
+end
+
+-- ╔══════════════════════════════════════════╗
+-- ║         CORE JUMP FUNCTION               ║
+-- ╚══════════════════════════════════════════╝
+
+local function doJump()
+	if jumpCooldown then return end
+	if jumpsLeft <= 0 then return end
+
+	local currentJump = (CONFIG.MaxJumps - jumpsLeft) + 1  -- 1 = first jump
+
+	jumpCooldown = true
+	task.delay(0.12, function() jumpCooldown = false end)
+
+	-- On ground: let Roblox handle first jump naturally
+	-- In air: force velocity upward
+	if not isGrounded then
+		local power = CONFIG.ExtraJumpPower
+		-- Each successive air jump is slightly weaker for feel
+		power = power - (currentJump - 2) * 3
+		HRP.AssemblyLinearVelocity = Vector3.new(
+			HRP.AssemblyLinearVelocity.X,
+			math.max(power, 35),
+			HRP.AssemblyLinearVelocity.Z
+		)
+		Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+	else
+		Humanoid.JumpPower = CONFIG.JumpPower
+		Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		isGrounded = false
+	end
+
+	jumpsLeft = jumpsLeft - 1
+
+	-- ── Effects ──────────────────────────────
+	local color = CONFIG.JumpColors[currentJump] or Color3.new(1,1,1)
+
+	spawnRing(currentJump)
+
+	if currentJump >= 2 then
+		screenFlash(color)
+		shakeCamera(CONFIG.CameraShakeAmount * (currentJump - 1), 0.1)
+	end
+
+	-- Play sound
+	if sounds[currentJump] then
+		sounds[currentJump]:Play()
+	end
+
+	-- Notify the gameplay GUI
+	local gui = Player.PlayerGui:FindFirstChild("GameplayGUI")
+	if gui then
+		local ev = gui:FindFirstChild("JumpUpdate")
+		if ev then ev:Fire(jumpsLeft, CONFIG.MaxJumps) end
+	end
+end
+
+-- ╔══════════════════════════════════════════╗
+-- ║      PC INPUT  (Spacebar)                ║
+-- ╚══════════════════════════════════════════╝
+
+UserInputService.JumpRequest:Connect(function()
+	doJump()
+end)
+
+-- ╔══════════════════════════════════════════╗
+-- ║   MOBILE  –  expose doJump globally      ║
+-- ║   (GameplayGUI mobile button calls this) ║
+-- ╚══════════════════════════════════════════╝
+
+-- Store in a BindableFunction so the GUI can call it
+local jumpFunc       = Instance.new("BindableFunction")
+jumpFunc.Name        = "RequestJump"
+jumpFunc.Parent      = Player.PlayerGui  -- GUI can find it here
+
+jumpFunc.OnInvoke    = function()
+	doJump()
+end
+
+print("[MultiJump] Loaded! Max jumps:", CONFIG.MaxJumps)
