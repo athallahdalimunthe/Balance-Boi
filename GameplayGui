@@ -1,0 +1,278 @@
+-- ============================================================
+--  GameplayGUI LocalScript  (Balance Boi)
+--  Place inside: StarterGui
+-- ============================================================
+--  • Jump counter with icon (top center, below hearts)
+--  • Mobile JUMP button (bottom center) with your image ID
+--  • Animated pip indicators per jump slot
+--  • Screen-edge glow on max jump used
+-- ============================================================
+
+-- ╔══════════════════════════════════════════╗
+-- ║          IMAGE ID CONFIGURATION          ║
+-- ╚══════════════════════════════════════════╝
+
+local CONFIG = {
+	MaxJumps = 5,   -- must match MultiJump.lua
+
+	-- ── Jump counter icons ──────────────────
+	JumpPipFull  = "rbxassetid://73061577156450",   -- filled pip (jump available)
+	JumpPipEmpty = "rbxassetid://73061577156450",  -- empty pip (jump used)
+
+	-- ── Mobile jump button ──────────────────
+	MobileJumpImage = "rbxassetid://89401894545504",
+
+	-- ── Jump number label colors ─────────────
+	JumpColors = {
+		[1] = Color3.fromRGB(255, 255, 255),
+		[2] = Color3.fromRGB(100, 220, 255),
+		[3] = Color3.fromRGB(120, 255, 120),
+		[4] = Color3.fromRGB(255, 200,  60),
+		[5] = Color3.fromRGB(255,  80, 200),
+	},
+
+	-- ── Edge glow when final jump used ──────
+	MaxJumpGlowColor = Color3.fromRGB(255, 60, 200),
+}
+
+-- ╔══════════════════════════════════════════╗
+-- ║               SERVICES                   ║
+-- ╚══════════════════════════════════════════╝
+
+local Players      = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UIS          = game:GetService("UserInputService")
+
+local Player       = Players.LocalPlayer
+local PlayerGui    = Player:WaitForChild("PlayerGui")
+
+-- ╔══════════════════════════════════════════╗
+-- ║          BUILD SCREENGUI                 ║
+-- ╚══════════════════════════════════════════╝
+
+local ScreenGui             = Instance.new("ScreenGui")
+ScreenGui.Name              = "GameplayGUI"
+ScreenGui.ResetOnSpawn      = false
+ScreenGui.IgnoreGuiInset    = true
+ScreenGui.DisplayOrder      = 5
+ScreenGui.Parent            = PlayerGui
+
+-- ── BindableEvent so MultiJump can ping us ──
+local JumpUpdate            = Instance.new("BindableEvent")
+JumpUpdate.Name             = "JumpUpdate"
+JumpUpdate.Parent           = ScreenGui
+
+-- ╔══════════════════════════════════════════╗
+-- ║   HELPERS                                ║
+-- ╚══════════════════════════════════════════╝
+
+local function makeFrame(name, parent, size, pos, bg, alpha, radius)
+	local f = Instance.new("Frame")
+	f.Name  = name; f.Size = size; f.Position = pos
+	f.BackgroundColor3 = bg or Color3.fromRGB(20,20,30)
+	f.BackgroundTransparency = alpha or 0.4
+	f.BorderSizePixel = 0; f.Parent = parent
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, radius or 12)
+	c.Parent = f
+	return f
+end
+
+local function makeImage(name, parent, size, pos, id, bgTrans)
+	local img = Instance.new("ImageLabel")
+	img.Name = name; img.Size = size; img.Position = pos
+	img.BackgroundTransparency = bgTrans or 1
+	img.Image = id; img.ScaleType = Enum.ScaleType.Fit
+	img.Parent = parent
+	return img
+end
+
+local function addStroke(p, thick, col, trans)
+	local s = Instance.new("UIStroke")
+	s.Thickness = thick or 2; s.Color = col or Color3.new(1,1,1)
+	s.Transparency = trans or 0.6
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Parent = p
+end
+
+-- ╔══════════════════════════════════════════╗
+-- ║   1.  JUMP COUNTER  (below hearts panel) ║
+-- ╚══════════════════════════════════════════╝
+--  Row of pip icons showing jumps remaining
+--  Positioned top-center, just below the hearts
+
+local pipSize   = 28
+local pipGap    = 6
+local panelW    = CONFIG.MaxJumps * (pipSize + pipGap) + 20
+local panelH    = 48
+
+local JumpPanel = makeFrame(
+	"JumpPanel", ScreenGui,
+	UDim2.new(0, panelW, 0, panelH),
+	UDim2.new(0.5, -panelW/2, 0, 82),   -- top-center, 82px from top (below hearts)
+	Color3.fromRGB(10, 10, 22), 0.45, 12
+)
+addStroke(JumpPanel, 1.5, Color3.fromRGB(180, 180, 255), 0.55)
+
+local pipLayout                 = Instance.new("UIListLayout")
+pipLayout.FillDirection         = Enum.FillDirection.Horizontal
+pipLayout.Padding               = UDim.new(0, pipGap)
+pipLayout.VerticalAlignment     = Enum.VerticalAlignment.Center
+pipLayout.HorizontalAlignment   = Enum.HorizontalAlignment.Center
+pipLayout.Parent                = JumpPanel
+
+local pipPad              = Instance.new("UIPadding")
+pipPad.PaddingLeft        = UDim.new(0, 8)
+pipPad.PaddingRight       = UDim.new(0, 8)
+pipPad.Parent             = JumpPanel
+
+-- Build pip images
+local pips = {}
+for i = 1, CONFIG.MaxJumps do
+	local pip = makeImage(
+		"Pip_"..i, JumpPanel,
+		UDim2.new(0, pipSize, 0, pipSize),
+		UDim2.new(0,0,0,0),
+		CONFIG.JumpPipFull
+	)
+	pip.ImageColor3 = CONFIG.JumpColors[i] or Color3.new(1,1,1)
+	pips[i] = pip
+end
+
+-- ╔══════════════════════════════════════════╗
+-- ║   2.  EDGE GLOW  (max jump warning)      ║
+-- ╚══════════════════════════════════════════╝
+
+local EdgeGlow              = Instance.new("Frame")
+EdgeGlow.Name               = "EdgeGlow"
+EdgeGlow.Size               = UDim2.new(1, 0, 1, 0)
+EdgeGlow.BackgroundTransparency = 1
+EdgeGlow.BorderSizePixel    = 0
+EdgeGlow.ZIndex             = 10
+EdgeGlow.Parent             = ScreenGui
+
+local glowImg               = Instance.new("ImageLabel")
+glowImg.Size                = UDim2.new(1, 0, 1, 0)
+glowImg.BackgroundTransparency = 1
+-- Built-in Roblox radial gradient (works without custom ID)
+glowImg.Image               = "rbxasset://textures/ui/VignetteBlur.png"
+glowImg.ImageColor3         = CONFIG.MaxJumpGlowColor
+glowImg.ImageTransparency   = 1
+glowImg.Parent              = EdgeGlow
+
+-- ╔══════════════════════════════════════════╗
+-- ║   3.  MOBILE JUMP BUTTON (bottom center) ║
+-- ╚══════════════════════════════════════════╝
+
+local isMobile = UIS.TouchEnabled and not UIS.KeyboardEnabled
+
+local MobileBtn             = makeFrame(
+	"MobileJumpBtn", ScreenGui,
+	UDim2.new(0, 90, 0, 90),
+	UDim2.new(0.5, -45, 1, -110),       -- bottom-center
+	Color3.fromRGB(30, 30, 50), 0.2, 45  -- fully round
+)
+addStroke(MobileBtn, 2.5, Color3.fromRGB(150, 200, 255), 0.3)
+
+-- Show only on mobile; PC players don't need it but it still works if tapped
+MobileBtn.Visible = isMobile
+
+local jumpBtnImg = makeImage(
+	"JumpIcon", MobileBtn,
+	UDim2.new(0.8, 0, 0.8, 0),
+	UDim2.new(0.1, 0, 0.1, 0),
+	CONFIG.MobileJumpImage
+)
+
+-- Clickable overlay
+local MobileDetector                = Instance.new("ImageButton")
+MobileDetector.Size                 = UDim2.new(1,0,1,0)
+MobileDetector.BackgroundTransparency = 1
+MobileDetector.Parent               = MobileBtn
+
+-- Animate press
+local pressIn  = TweenService:Create(MobileBtn,
+	TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+	{ Size = UDim2.new(0,80,0,80), Position = UDim2.new(0.5,-40,1,-100) }
+)
+local pressOut = TweenService:Create(MobileBtn,
+	TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+	{ Size = UDim2.new(0,90,0,90), Position = UDim2.new(0.5,-45,1,-110) }
+)
+
+MobileDetector.MouseButton1Down:Connect(function()
+	pressIn:Play()
+	-- Call the jump BindableFunction in MultiJump
+	local bf = PlayerGui:FindFirstChild("RequestJump")
+	if bf then bf:Invoke() end
+end)
+
+MobileDetector.MouseButton1Up:Connect(function()
+	pressOut:Play()
+end)
+
+-- ╔══════════════════════════════════════════╗
+-- ║   4.  JUMP UPDATE HANDLER                ║
+-- ╚══════════════════════════════════════════╝
+
+local function onJumpUpdate(jumpsLeft, maxJumps)
+	-- Update pips
+	for i = 1, maxJumps do
+		local pip = pips[i]
+		if not pip then continue end
+
+		if i <= jumpsLeft then
+			-- Available jump
+			pip.Image = CONFIG.JumpPipFull
+			pip.ImageTransparency = 0
+			TweenService:Create(pip,
+				TweenInfo.new(0.1, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+				{ Size = UDim2.new(0, pipSize, 0, pipSize) }
+			):Play()
+		else
+			-- Used jump — shrink and fade
+			pip.Image = CONFIG.JumpPipEmpty
+			TweenService:Create(pip,
+				TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ ImageTransparency = 0.55, Size = UDim2.new(0, pipSize-6, 0, pipSize-6) }
+			):Play()
+		end
+	end
+
+	-- Bounce the whole panel
+	TweenService:Create(JumpPanel,
+		TweenInfo.new(0.08, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		{ Size = UDim2.new(0, panelW+8, 0, panelH+6),
+			Position = UDim2.new(0.5, -(panelW+8)/2, 0, 79) }
+	):Play()
+	task.delay(0.12, function()
+		TweenService:Create(JumpPanel,
+			TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Size = UDim2.new(0, panelW, 0, panelH),
+				Position = UDim2.new(0.5, -panelW/2, 0, 82) }
+		):Play()
+	end)
+
+	-- Edge glow on last jump
+	if jumpsLeft == 0 then
+		TweenService:Create(glowImg,
+			TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ ImageTransparency = 0.35 }
+		):Play()
+		task.delay(0.5, function()
+			TweenService:Create(glowImg,
+				TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+				{ ImageTransparency = 1 }
+			):Play()
+		end)
+	else
+		glowImg.ImageTransparency = 1
+	end
+end
+
+JumpUpdate.Event:Connect(onJumpUpdate)
+
+-- Init display
+onJumpUpdate(CONFIG.MaxJumps, CONFIG.MaxJumps)
+
+print("[GameplayGUI] Loaded!")
