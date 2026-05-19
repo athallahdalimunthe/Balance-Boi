@@ -2,147 +2,165 @@
 --  JumpManager  (ServerScript)
 --  Place inside: ServerScriptService
 -- ============================================================
---  SOURCE OF TRUTH for every player's max jumps.
---  Handles hit detection and jump stealing between players.
---
---  FLOW:
---    Client punches → fires "RequestHit" RemoteEvent →
---    Server validates → transfers 1 jump → fires "JumpCountChanged"
---    to both players → their LocalScripts update
--- ============================================================
 
 local CONFIG = {
-	MinJumps    = 5,    -- floor — can never go below this
-	HitCooldown = 0.8,  -- seconds between hits (anti-spam)
-	HitRange    = 8,    -- studs — max distance for a hit to count
+	MinJumps    = 5,
+	HitCooldown = 0.8,
+	HitRange    = 20,   -- increased from 8 → 20 studs (much easier to hit)
 }
-
--- ╔══════════════════════════════════════════╗
--- ║               SERVICES                   ║
--- ╚══════════════════════════════════════════╝
 
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- ╔══════════════════════════════════════════╗
--- ║         REMOTE EVENTS SETUP              ║
+-- ║   CREATE REMOTES FOLDER                  ║
+-- ║   Pre-create in ReplicatedStorage so     ║
+-- ║   clients can always find them           ║
 -- ╚══════════════════════════════════════════╝
 
--- Folder to keep things tidy
+-- Remove old folder if it exists (clean start)
+local old = ReplicatedStorage:FindFirstChild("JumpRemotes")
+if old then old:Destroy() end
+
 local Remotes = Instance.new("Folder")
 Remotes.Name  = "JumpRemotes"
 Remotes.Parent = ReplicatedStorage
 
--- Client → Server: "I punched someone"
 local RequestHit = Instance.new("RemoteEvent")
 RequestHit.Name  = "RequestHit"
 RequestHit.Parent = Remotes
 
--- Server → Client: "Your jump count changed"
 local JumpCountChanged = Instance.new("RemoteEvent")
 JumpCountChanged.Name  = "JumpCountChanged"
 JumpCountChanged.Parent = Remotes
 
--- Server → Client: "You just got hit!" (for hit effect on victim)
 local GotHit = Instance.new("RemoteEvent")
 GotHit.Name   = "GotHit"
 GotHit.Parent = Remotes
 
+print("[JumpManager] Remotes created in ReplicatedStorage")
+
 -- ╔══════════════════════════════════════════╗
--- ║         JUMP COUNT STORAGE               ║
+-- ║   JUMP COUNT STORAGE                     ║
 -- ╚══════════════════════════════════════════╝
 
--- playerJumps[player] = their current MAX jumps (starts at MinJumps)
-local playerJumps   = {}
-local lastHitTime   = {}  -- cooldown tracking per player
+local playerJumps = {}
+local lastHitTime = {}
 
 local function getJumps(player)
 	return playerJumps[player] or CONFIG.MinJumps
 end
 
 local function setJumps(player, amount)
-	-- Floor at MinJumps, no ceiling (you can go very high!)
 	playerJumps[player] = math.max(amount, CONFIG.MinJumps)
-	-- Tell that player their new count
 	JumpCountChanged:FireClient(player, playerJumps[player])
+	print("[JumpManager] SET", player.Name, "→", playerJumps[player], "jumps")
 end
 
 -- ╔══════════════════════════════════════════╗
--- ║         PLAYER SETUP / CLEANUP           ║
+-- ║   PLAYER SETUP                           ║
 -- ╚══════════════════════════════════════════╝
 
-Players.PlayerAdded:Connect(function(player)
-	playerJumps[player]  = CONFIG.MinJumps
-	lastHitTime[player]  = 0
+local function setupPlayer(player)
+	playerJumps[player] = CONFIG.MinJumps
+	lastHitTime[player] = 0
+	print("[JumpManager] Registered player:", player.Name)
 
-	-- Send initial count when character spawns
 	player.CharacterAdded:Connect(function()
-		task.wait(0.5)  -- let client scripts load
+		task.wait(0.8)  -- give client extra time to load
+		print("[JumpManager] Sending initial jumps to", player.Name, ":", getJumps(player))
 		JumpCountChanged:FireClient(player, getJumps(player))
 	end)
-end)
+end
+
+-- Handle players already in game when script runs
+for _, player in ipairs(Players:GetPlayers()) do
+	setupPlayer(player)
+end
+
+Players.PlayerAdded:Connect(setupPlayer)
 
 Players.PlayerRemoving:Connect(function(player)
-	playerJumps[player]  = nil
-	lastHitTime[player]  = nil
+	playerJumps[player] = nil
+	lastHitTime[player] = nil
 end)
 
 -- ╔══════════════════════════════════════════╗
--- ║         HIT REQUEST HANDLER              ║
+-- ║   HIT HANDLER                            ║
 -- ╚══════════════════════════════════════════╝
 
 RequestHit.OnServerEvent:Connect(function(attacker, targetPlayer)
+	print("[JumpManager] Hit request from:", attacker.Name, "→ target:", tostring(targetPlayer))
 
-	-- ── Sanity checks ───────────────────────
+	-- Valid player target
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		print("[JumpManager] REJECTED: invalid target")
+		return
+	end
 
-	-- Must be a valid player
-	if not targetPlayer or not targetPlayer:IsA("Player") then return end
-	-- Can't hit yourself
-	if attacker == targetPlayer then return end
+	-- No self-hit
+	if attacker == targetPlayer then
+		print("[JumpManager] REJECTED: self hit")
+		return
+	end
 
-	-- Cooldown check
+	-- Cooldown
 	local now = tick()
-	if (now - (lastHitTime[attacker] or 0)) < CONFIG.HitCooldown then return end
+	local timeSinceLast = now - (lastHitTime[attacker] or 0)
+	if timeSinceLast < CONFIG.HitCooldown then
+		print("[JumpManager] REJECTED: cooldown", timeSinceLast)
+		return
+	end
 
-	-- Both must have characters alive
-	local atkChar    = attacker.Character
-	local tgtChar    = targetPlayer.Character
-	if not atkChar or not tgtChar then return end
+	-- Characters exist
+	local atkChar = attacker.Character
+	local tgtChar = targetPlayer.Character
+	if not atkChar or not tgtChar then
+		print("[JumpManager] REJECTED: missing character")
+		return
+	end
 
-	local atkHRP     = atkChar:FindFirstChild("HumanoidRootPart")
-	local tgtHRP     = tgtChar:FindFirstChild("HumanoidRootPart")
-	if not atkHRP or not tgtHRP then return end
+	local atkHRP  = atkChar:FindFirstChild("HumanoidRootPart")
+	local tgtHRP  = tgtChar:FindFirstChild("HumanoidRootPart")
+	if not atkHRP or not tgtHRP then
+		print("[JumpManager] REJECTED: missing HRP")
+		return
+	end
 
-	local tgtHuman   = tgtChar:FindFirstChild("Humanoid")
-	if not tgtHuman or tgtHuman.Health <= 0 then return end
+	local tgtHuman = tgtChar:FindFirstChild("Humanoid")
+	if not tgtHuman or tgtHuman.Health <= 0 then
+		print("[JumpManager] REJECTED: target dead")
+		return
+	end
 
-	-- Range check (server-side, can't be spoofed)
+	-- Range check
 	local dist = (atkHRP.Position - tgtHRP.Position).Magnitude
-	if dist > CONFIG.HitRange then return end
+	print("[JumpManager] Distance:", dist, "/ Range:", CONFIG.HitRange)
+	if dist > CONFIG.HitRange then
+		print("[JumpManager] REJECTED: out of range")
+		return
+	end
 
-	-- ── Transfer 1 jump ─────────────────────
-
+	-- ── All checks passed — transfer jump ───
 	lastHitTime[attacker] = now
 
-	local victimJumps    = getJumps(targetPlayer)
-	local attackerJumps  = getJumps(attacker)
+	local victimJumps   = getJumps(targetPlayer)
+	local attackerJumps = getJumps(attacker)
 
-	-- Victim loses 1 (but not below MinJumps)
-	local victimNew      = math.max(victimJumps - 1, CONFIG.MinJumps)
-	-- Attacker gains 1 ONLY if victim actually lost one
-	local stolen         = victimJumps - victimNew  -- 0 or 1
-	local attackerNew    = attackerJumps + stolen
+	-- Victim loses 1 only if above the floor
+	local victimNew   = math.max(victimJumps - 1, CONFIG.MinJumps)
+	-- Attacker ALWAYS gains 1 on a successful hit — that's the reward!
+	local attackerNew = attackerJumps + 1
 
 	setJumps(targetPlayer, victimNew)
-	setJumps(attacker,     attackerNew)
+	setJumps(attacker, attackerNew)
 
-	-- Tell victim they got hit (for screen effect)
 	GotHit:FireClient(targetPlayer, attacker.Name)
 
-	print(string.format("[JumpManager] %s hit %s | %s: %d→%d jumps | %s: %d→%d jumps",
+	print(string.format("[JumpManager] ✅ %s hit %s! %s: %d→%d | %s: %d→%d",
 		attacker.Name, targetPlayer.Name,
 		targetPlayer.Name, victimJumps, victimNew,
 		attacker.Name, attackerJumps, attackerNew))
 end)
 
-print("[JumpManager] Running!")
+print("[JumpManager] Running! HitRange:", CONFIG.HitRange)
