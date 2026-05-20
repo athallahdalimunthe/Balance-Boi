@@ -2,23 +2,28 @@
 --  JumpManager  (ServerScript)
 --  Place inside: ServerScriptService
 -- ============================================================
+--  • DataStore: saves jumps on leave, loads on join
+--  • JumpCountChanged  → fires to the owner (pip GUI)
+--  • JumpCountBroadcast → fires to ALL clients (overhead labels)
+-- ============================================================
 
 local CONFIG = {
-	MinJumps    = 5,
-	HitCooldown = 0.8,
-	HitRange    = 20,   -- increased from 8 → 20 studs (much easier to hit)
+	MinJumps     = 5,
+	HitCooldown  = 0.8,
+	HitRange     = 20,
+	DataStoreKey = "BalanceBoi_Jumps_v1",
 }
 
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local DataStoreService  = game:GetService("DataStoreService")
+
+local JumpStore = DataStoreService:GetDataStore(CONFIG.DataStoreKey)
 
 -- ╔══════════════════════════════════════════╗
--- ║   CREATE REMOTES FOLDER                  ║
--- ║   Pre-create in ReplicatedStorage so     ║
--- ║   clients can always find them           ║
+-- ║   REMOTES                                ║
 -- ╚══════════════════════════════════════════╝
 
--- Remove old folder if it exists (clean start)
 local old = ReplicatedStorage:FindFirstChild("JumpRemotes")
 if old then old:Destroy() end
 
@@ -26,19 +31,24 @@ local Remotes = Instance.new("Folder")
 Remotes.Name  = "JumpRemotes"
 Remotes.Parent = ReplicatedStorage
 
-local RequestHit = Instance.new("RemoteEvent")
-RequestHit.Name  = "RequestHit"
-RequestHit.Parent = Remotes
+local RequestHit         = Instance.new("RemoteEvent")
+RequestHit.Name          = "RequestHit"
+RequestHit.Parent        = Remotes
 
-local JumpCountChanged = Instance.new("RemoteEvent")
-JumpCountChanged.Name  = "JumpCountChanged"
-JumpCountChanged.Parent = Remotes
+local JumpCountChanged   = Instance.new("RemoteEvent")
+JumpCountChanged.Name    = "JumpCountChanged"
+JumpCountChanged.Parent  = Remotes
 
-local GotHit = Instance.new("RemoteEvent")
-GotHit.Name   = "GotHit"
-GotHit.Parent = Remotes
+-- Fires to ALL clients so every overhead label updates
+local JumpCountBroadcast = Instance.new("RemoteEvent")
+JumpCountBroadcast.Name  = "JumpCountBroadcast"
+JumpCountBroadcast.Parent = Remotes
 
-print("[JumpManager] Remotes created in ReplicatedStorage")
+local GotHit             = Instance.new("RemoteEvent")
+GotHit.Name              = "GotHit"
+GotHit.Parent            = Remotes
+
+print("[JumpManager] Remotes created OK")
 
 -- ╔══════════════════════════════════════════╗
 -- ║   JUMP COUNT STORAGE                     ║
@@ -53,8 +63,45 @@ end
 
 local function setJumps(player, amount)
 	playerJumps[player] = math.max(amount, CONFIG.MinJumps)
-	JumpCountChanged:FireClient(player, playerJumps[player])
-	print("[JumpManager] SET", player.Name, "→", playerJumps[player], "jumps")
+	local count = playerJumps[player]
+
+	-- Tell the owner (pip counter GUI)
+	JumpCountChanged:FireClient(player, count)
+
+	-- Tell ALL clients (overhead label on this player)
+	JumpCountBroadcast:FireAllClients(player, count)
+
+	print("[JumpManager] SET", player.Name, "→", count, "jumps")
+end
+
+-- ╔══════════════════════════════════════════╗
+-- ║   DATASTORE  LOAD / SAVE                 ║
+-- ╚══════════════════════════════════════════╝
+
+local function loadJumps(player)
+	local key = tostring(player.UserId)
+	local ok, data = pcall(function()
+		return JumpStore:GetAsync(key)
+	end)
+	if ok and type(data) == "number" then
+		local saved = math.max(data, CONFIG.MinJumps)
+		print("[JumpManager] Loaded", player.Name, "→", saved, "jumps")
+		return saved
+	end
+	if not ok then warn("[JumpManager] Load failed for", player.Name, ":", data) end
+	return CONFIG.MinJumps
+end
+
+local function saveJumps(player)
+	local key = tostring(player.UserId)
+	local ok, err = pcall(function()
+		JumpStore:SetAsync(key, getJumps(player))
+	end)
+	if ok then
+		print("[JumpManager] Saved", player.Name, "→", getJumps(player), "jumps")
+	else
+		warn("[JumpManager] Save failed for", player.Name, ":", err)
+	end
 end
 
 -- ╔══════════════════════════════════════════╗
@@ -62,27 +109,42 @@ end
 -- ╚══════════════════════════════════════════╝
 
 local function setupPlayer(player)
-	playerJumps[player] = CONFIG.MinJumps
-	lastHitTime[player] = 0
-	print("[JumpManager] Registered player:", player.Name)
+	lastHitTime[player]  = 0
+	playerJumps[player]  = loadJumps(player)
+
+	print("[JumpManager] Registered:", player.Name, "with", playerJumps[player], "jumps")
 
 	player.CharacterAdded:Connect(function()
-		task.wait(0.8)  -- give client extra time to load
-		print("[JumpManager] Sending initial jumps to", player.Name, ":", getJumps(player))
-		JumpCountChanged:FireClient(player, getJumps(player))
+		task.wait(0.8)  -- let client LocalScripts finish loading
+		local count = getJumps(player)
+		JumpCountChanged:FireClient(player, count)
+		JumpCountBroadcast:FireAllClients(player, count)
+		print("[JumpManager] Sent spawn jumps to", player.Name, ":", count)
 	end)
 end
 
--- Handle players already in game when script runs
+-- Handle players already in server when script runs
 for _, player in ipairs(Players:GetPlayers()) do
-	setupPlayer(player)
+	task.spawn(setupPlayer, player)
 end
 
-Players.PlayerAdded:Connect(setupPlayer)
+Players.PlayerAdded:Connect(function(player)
+	task.spawn(setupPlayer, player)
+end)
 
 Players.PlayerRemoving:Connect(function(player)
+	saveJumps(player)
 	playerJumps[player] = nil
 	lastHitTime[player] = nil
+end)
+
+-- Save everyone on unexpected server shutdown
+game:BindToClose(function()
+	print("[JumpManager] Server closing — saving all...")
+	for _, player in ipairs(Players:GetPlayers()) do
+		task.spawn(saveJumps, player)
+	end
+	task.wait(2)  -- give DataStore calls time to finish
 end)
 
 -- ╔══════════════════════════════════════════╗
@@ -90,77 +152,45 @@ end)
 -- ╚══════════════════════════════════════════╝
 
 RequestHit.OnServerEvent:Connect(function(attacker, targetPlayer)
-	print("[JumpManager] Hit request from:", attacker.Name, "→ target:", tostring(targetPlayer))
+	print("[JumpManager] Hit request:", attacker.Name, "→", tostring(targetPlayer))
 
-	-- Valid player target
-	if not targetPlayer or not targetPlayer:IsA("Player") then
-		print("[JumpManager] REJECTED: invalid target")
-		return
-	end
+	if not targetPlayer or not targetPlayer:IsA("Player") then return end
+	if attacker == targetPlayer then return end
 
-	-- No self-hit
-	if attacker == targetPlayer then
-		print("[JumpManager] REJECTED: self hit")
-		return
-	end
-
-	-- Cooldown
 	local now = tick()
-	local timeSinceLast = now - (lastHitTime[attacker] or 0)
-	if timeSinceLast < CONFIG.HitCooldown then
-		print("[JumpManager] REJECTED: cooldown", timeSinceLast)
-		return
-	end
+	if (now - (lastHitTime[attacker] or 0)) < CONFIG.HitCooldown then return end
 
-	-- Characters exist
-	local atkChar = attacker.Character
-	local tgtChar = targetPlayer.Character
-	if not atkChar or not tgtChar then
-		print("[JumpManager] REJECTED: missing character")
-		return
-	end
+	local atkChar  = attacker.Character
+	local tgtChar  = targetPlayer.Character
+	if not atkChar or not tgtChar then return end
 
-	local atkHRP  = atkChar:FindFirstChild("HumanoidRootPart")
-	local tgtHRP  = tgtChar:FindFirstChild("HumanoidRootPart")
-	if not atkHRP or not tgtHRP then
-		print("[JumpManager] REJECTED: missing HRP")
-		return
-	end
+	local atkHRP   = atkChar:FindFirstChild("HumanoidRootPart")
+	local tgtHRP   = tgtChar:FindFirstChild("HumanoidRootPart")
+	if not atkHRP or not tgtHRP then return end
 
 	local tgtHuman = tgtChar:FindFirstChild("Humanoid")
-	if not tgtHuman or tgtHuman.Health <= 0 then
-		print("[JumpManager] REJECTED: target dead")
-		return
-	end
+	if not tgtHuman or tgtHuman.Health <= 0 then return end
 
-	-- Range check
 	local dist = (atkHRP.Position - tgtHRP.Position).Magnitude
-	print("[JumpManager] Distance:", dist, "/ Range:", CONFIG.HitRange)
-	if dist > CONFIG.HitRange then
-		print("[JumpManager] REJECTED: out of range")
-		return
-	end
+	print("[JumpManager] Distance:", math.floor(dist), "studs")
+	if dist > CONFIG.HitRange then return end
 
-	-- ── All checks passed — transfer jump ───
 	lastHitTime[attacker] = now
 
 	local victimJumps   = getJumps(targetPlayer)
 	local attackerJumps = getJumps(attacker)
-
-	-- Victim loses 1 only if above the floor
-	local victimNew   = math.max(victimJumps - 1, CONFIG.MinJumps)
-	-- Attacker ALWAYS gains 1 on a successful hit — that's the reward!
-	local attackerNew = attackerJumps + 1
+	local victimNew     = math.max(victimJumps - 1, CONFIG.MinJumps)
+	local attackerNew   = attackerJumps + 1
 
 	setJumps(targetPlayer, victimNew)
 	setJumps(attacker, attackerNew)
 
 	GotHit:FireClient(targetPlayer, attacker.Name)
 
-	print(string.format("[JumpManager] ✅ %s hit %s! %s: %d→%d | %s: %d→%d",
+	print(string.format("[JumpManager] ✅ %s hit %s! %s:%d→%d | %s:%d→%d",
 		attacker.Name, targetPlayer.Name,
 		targetPlayer.Name, victimJumps, victimNew,
 		attacker.Name, attackerJumps, attackerNew))
 end)
 
-print("[JumpManager] Running! HitRange:", CONFIG.HitRange)
+print("[JumpManager] Running! Range:", CONFIG.HitRange, "| Store:", CONFIG.DataStoreKey)
