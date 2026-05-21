@@ -1,0 +1,334 @@
+-- ============================================================
+--  ShieldGUI  LocalScript  (Balance Boi)
+--  Place inside: StarterGui
+-- ============================================================
+--  • Shield button on the LEFT side of screen
+--  • Shows 12s countdown while active
+--  • Shows cooldown timer before you can use it again
+--  • Blue ring pulse while protected
+--  • Works on PC (press Q) and Mobile (tap button)
+-- ============================================================
+
+-- ╔══════════════════════════════════════════╗
+-- ║          IMAGE ID CONFIG                 ║
+-- ╚══════════════════════════════════════════╝
+
+local CONFIG = {
+	ShieldTime     = 14,
+	ShieldCooldown = 30,
+
+	-- Put your shield button image ID here
+	ShieldImage    = "rbxassetid://89401894545504",
+
+	-- Colors
+	ShieldActiveColor  = Color3.fromRGB(0, 221, 255),  -- blue when on
+	ShieldReadyColor   = Color3.fromRGB(30,  30,  60),   -- dark when ready
+	ShieldCooldownColor = Color3.fromRGB(40, 40,  40),   -- grey on cooldown
+	ShieldBlockedColor  = Color3.fromRGB(255, 80,  80),  -- red flash when blocked
+}
+
+-- ╔══════════════════════════════════════════╗
+-- ║   SERVICES                               ║
+-- ╚══════════════════════════════════════════╝
+
+local Players           = game:GetService("Players")
+local TweenService      = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService  = game:GetService("UserInputService")
+
+local Player    = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+-- ╔══════════════════════════════════════════╗
+-- ║   REMOTES                                ║
+-- ╚══════════════════════════════════════════╝
+
+local Remotes            = ReplicatedStorage:WaitForChild("JumpRemotes", 15)
+local RequestShield      = Remotes:WaitForChild("RequestShield", 10)
+local ShieldStateChanged = Remotes:WaitForChild("ShieldStateChanged", 10)
+
+-- ╔══════════════════════════════════════════╗
+-- ║   BUILD GUI                              ║
+-- ╚══════════════════════════════════════════╝
+
+local ScreenGui             = Instance.new("ScreenGui")
+ScreenGui.Name              = "ShieldGUI"
+ScreenGui.ResetOnSpawn      = false
+ScreenGui.IgnoreGuiInset    = true
+ScreenGui.DisplayOrder      = 6
+ScreenGui.Parent            = PlayerGui
+
+-- ── Main shield button ───────────────────────────────────────
+-- Left side of screen, vertically centered
+local ShieldBtn             = Instance.new("Frame")
+ShieldBtn.Name              = "ShieldBtn"
+ShieldBtn.Size              = UDim2.new(0, 80, 0, 80)
+ShieldBtn.Position          = UDim2.new(0, 16, 0.5, -40)
+ShieldBtn.BackgroundColor3  = CONFIG.ShieldReadyColor
+ShieldBtn.BackgroundTransparency = 0.2
+ShieldBtn.BorderSizePixel   = 0
+ShieldBtn.Parent            = ScreenGui
+Instance.new("UICorner", ShieldBtn).CornerRadius = UDim.new(0, 40)
+
+local stroke                = Instance.new("UIStroke")
+stroke.Thickness            = 2.5
+stroke.Color                = CONFIG.ShieldActiveColor
+stroke.Transparency         = 0.5
+stroke.ApplyStrokeMode      = Enum.ApplyStrokeMode.Border
+stroke.Parent               = ShieldBtn
+
+-- Shield icon
+local shieldIcon            = Instance.new("ImageLabel")
+shieldIcon.Size             = UDim2.new(0.65, 0, 0.65, 0)
+shieldIcon.Position         = UDim2.new(0.175, 0, 0.1, 0)
+shieldIcon.BackgroundTransparency = 1
+shieldIcon.Image            = CONFIG.ShieldImage
+shieldIcon.ScaleType        = Enum.ScaleType.Fit
+shieldIcon.Parent           = ShieldBtn
+
+-- Countdown / label under icon
+local timerLabel            = Instance.new("TextLabel")
+timerLabel.Size             = UDim2.new(1, 0, 0, 22)
+timerLabel.Position         = UDim2.new(0, 0, 1, -24)
+timerLabel.BackgroundTransparency = 1
+timerLabel.Text             = "SHIELD"
+timerLabel.TextColor3       = Color3.fromRGB(180, 210, 255)
+timerLabel.TextScaled       = true
+timerLabel.Font             = Enum.Font.GothamBold
+timerLabel.Parent           = ShieldBtn
+
+-- "Q" key hint label (PC only)
+local keyHint               = Instance.new("TextLabel")
+keyHint.Size                = UDim2.new(0, 22, 0, 22)
+keyHint.Position            = UDim2.new(1, 4, 0, 0)
+keyHint.BackgroundColor3    = Color3.fromRGB(30, 30, 50)
+keyHint.BackgroundTransparency = 0.3
+keyHint.Text                = "Q"
+keyHint.TextColor3          = Color3.fromRGB(180, 200, 255)
+keyHint.TextScaled          = true
+keyHint.Font                = Enum.Font.GothamBold
+keyHint.BorderSizePixel     = 0
+keyHint.Parent              = ShieldBtn
+Instance.new("UICorner", keyHint).CornerRadius = UDim.new(0, 4)
+
+local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+keyHint.Visible = not isMobile
+
+-- Clickable overlay
+local Detector              = Instance.new("ImageButton")
+Detector.Size               = UDim2.new(1, 0, 1, 0)
+Detector.BackgroundTransparency = 1
+Detector.Parent             = ShieldBtn
+
+-- ── Screen-edge shield glow (visible while shielded) ─────────
+local ShieldOverlay         = Instance.new("Frame")
+ShieldOverlay.Name          = "ShieldOverlay"
+ShieldOverlay.Size          = UDim2.new(1, 0, 1, 0)
+ShieldOverlay.BackgroundTransparency = 1
+ShieldOverlay.BorderSizePixel = 0
+ShieldOverlay.ZIndex        = 2
+ShieldOverlay.Parent        = ScreenGui
+
+local overlayImg            = Instance.new("ImageLabel")
+overlayImg.Size             = UDim2.new(1, 0, 1, 0)
+overlayImg.BackgroundTransparency = 1
+overlayImg.Image            = "rbxasset://textures/ui/VignetteBlur.png"
+overlayImg.ImageColor3      = CONFIG.ShieldActiveColor
+overlayImg.ImageTransparency = 1
+overlayImg.ZIndex           = 2
+overlayImg.Parent           = ShieldOverlay
+
+-- ╔══════════════════════════════════════════╗
+-- ║   STATE                                  ║
+-- ╚══════════════════════════════════════════╝
+
+local shieldState  = "ready"   -- "ready" | "active" | "cooldown"
+local countThread  = nil        -- current countdown coroutine
+
+-- ╔══════════════════════════════════════════╗
+-- ║   VISUAL HELPERS                         ║
+-- ╚══════════════════════════════════════════╝
+
+local function setButtonColor(color, strokeTrans)
+	TweenService:Create(ShieldBtn,
+		TweenInfo.new(0.2, Enum.EasingStyle.Quad),
+		{ BackgroundColor3 = color }
+	):Play()
+	TweenService:Create(stroke,
+		TweenInfo.new(0.2), { Transparency = strokeTrans or 0.5 }
+	):Play()
+end
+
+local function pulseOverlay(transparency)
+	TweenService:Create(overlayImg,
+		TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ ImageTransparency = transparency }
+	):Play()
+end
+
+local function stopCountThread()
+	if countThread then
+		task.cancel(countThread)
+		countThread = nil
+	end
+end
+
+-- ╔══════════════════════════════════════════╗
+-- ║   STATE HANDLERS                         ║
+-- ╚══════════════════════════════════════════╝
+
+local function onShieldActive(duration)
+	shieldState = "active"
+	stopCountThread()
+
+	setButtonColor(CONFIG.ShieldActiveColor, 0.1)
+	stroke.Color = CONFIG.ShieldActiveColor
+	timerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	shieldIcon.ImageTransparency = 0
+
+	-- Pulsing blue edge glow
+	pulseOverlay(0.55)
+
+	-- Animate button scale up slightly
+	TweenService:Create(ShieldBtn,
+		TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		{ Size = UDim2.new(0, 90, 0, 90), Position = UDim2.new(0, 11, 0.5, -45) }
+	):Play()
+
+	-- Countdown tick
+	countThread = task.spawn(function()
+		for i = duration, 0, -1 do
+			timerLabel.Text = i > 0 and (i .. "s") or "SHIELD"
+			task.wait(1)
+		end
+	end)
+end
+
+local function onShieldOff(cooldown)
+	shieldState = "cooldown"
+	stopCountThread()
+
+	setButtonColor(CONFIG.ShieldCooldownColor, 0.8)
+	stroke.Color = Color3.fromRGB(100, 100, 120)
+	timerLabel.TextColor3 = Color3.fromRGB(130, 130, 150)
+	shieldIcon.ImageTransparency = 0.5
+
+	pulseOverlay(1)  -- remove glow
+
+	-- Reset button size
+	TweenService:Create(ShieldBtn,
+		TweenInfo.new(0.1, Enum.EasingStyle.Quad),
+		{ Size = UDim2.new(0, 80, 0, 80), Position = UDim2.new(0, 16, 0.5, -40) }
+	):Play()
+
+	-- Cooldown countdown
+	countThread = task.spawn(function()
+		for i = cooldown, 0, -1 do
+			timerLabel.Text = i > 0 and ("CD "..i.."s") or "SHIELD"
+			task.wait(1)
+		end
+		-- Cooldown done — back to ready
+		shieldState = "ready"
+		setButtonColor(CONFIG.ShieldReadyColor, 0.4)
+		stroke.Color = CONFIG.ShieldActiveColor
+		timerLabel.TextColor3 = Color3.fromRGB(180, 210, 255)
+		shieldIcon.ImageTransparency = 0
+		timerLabel.Text = "SHIELD"
+	end)
+end
+
+local function onShieldCooldownMsg(remaining)
+	-- Flash label to show it's on cooldown
+	timerLabel.Text = "CD "..remaining.."s"
+	TweenService:Create(timerLabel,
+		TweenInfo.new(0.1), { TextColor3 = Color3.fromRGB(255,80,80) }
+	):Play()
+	task.delay(0.5, function()
+		TweenService:Create(timerLabel,
+			TweenInfo.new(0.3), { TextColor3 = Color3.fromRGB(130,130,150) }
+		):Play()
+	end)
+end
+
+local function onShieldBlocked()
+	-- Hit someone's shield — brief red flash on our button
+	TweenService:Create(ShieldBtn,
+		TweenInfo.new(0.05), { BackgroundColor3 = CONFIG.ShieldBlockedColor }
+	):Play()
+	task.delay(0.3, function()
+		local targetColor = shieldState == "ready" and CONFIG.ShieldReadyColor or CONFIG.ShieldCooldownColor
+		TweenService:Create(ShieldBtn,
+			TweenInfo.new(0.2), { BackgroundColor3 = targetColor }
+		):Play()
+	end)
+end
+
+-- ╔══════════════════════════════════════════╗
+-- ║   SERVER → CLIENT: shield state          ║
+-- ╚══════════════════════════════════════════╝
+
+ShieldStateChanged.OnClientEvent:Connect(function(targetPlayer, state, value)
+	-- Only react to our own shield state for the button/overlay
+	-- Other players' shield states are handled by OverheadLabel script
+	if targetPlayer ~= Player then return end
+
+	if state == "on" then
+		onShieldActive(value)
+	elseif state == "off" then
+		onShieldOff(value)
+	elseif state == "cooldown" then
+		onShieldCooldownMsg(value)
+	elseif state == "blocked" then
+		onShieldBlocked()
+	end
+end)
+
+-- ╔══════════════════════════════════════════╗
+-- ║   ACTIVATE SHIELD                        ║
+-- ╚══════════════════════════════════════════╝
+
+local function tryActivateShield()
+	if shieldState ~= "ready" then return end
+	RequestShield:FireServer()
+	-- Optimistic visual (server will confirm)
+	onShieldActive(CONFIG.ShieldTime)
+end
+
+-- Button press
+Detector.MouseButton1Click:Connect(tryActivateShield)
+
+-- Press animation
+Detector.MouseButton1Down:Connect(function()
+	TweenService:Create(ShieldBtn,
+		TweenInfo.new(0.08, Enum.EasingStyle.Quad),
+		{ Size = UDim2.new(0, 72, 0, 72), Position = UDim2.new(0, 20, 0.5, -36) }
+	):Play()
+end)
+Detector.MouseButton1Up:Connect(function()
+	TweenService:Create(ShieldBtn,
+		TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		{ Size = UDim2.new(0, 80, 0, 80), Position = UDim2.new(0, 16, 0.5, -40) }
+	):Play()
+end)
+
+-- PC: Q key shortcut
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	if input.KeyCode == Enum.KeyCode.Q then
+		tryActivateShield()
+	end
+end)
+
+-- ╔══════════════════════════════════════════╗
+-- ║   RESPAWN RESET                          ║
+-- ╚══════════════════════════════════════════╝
+
+Player.CharacterAdded:Connect(function()
+	-- Don't reset state — shield carries through respawn by design
+	-- Just make sure overlay is correct
+	if shieldState ~= "active" then
+		pulseOverlay(1)
+	end
+end)
+
+print("[ShieldGUI] Loaded!")
