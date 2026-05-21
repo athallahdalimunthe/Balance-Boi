@@ -256,6 +256,18 @@ GotHit.OnClientEvent:Connect(function(attackerName)
 	lostSound:Play()
 end)
 
+-- Shield blocked our punch → blue flash feedback
+local ShieldStateChanged = Remotes:WaitForChild("ShieldStateChanged", 10)
+if ShieldStateChanged then
+	ShieldStateChanged.OnClientEvent:Connect(function(targetPlayer, state, _value)
+		if targetPlayer == Player and state == "blocked" then
+			screenFlash(Color3.fromRGB(80, 160, 255))
+			shakeCamera(0.1, 0.06)
+			print("[MultiJump] Punch blocked by shield!")
+		end
+	end)
+end
+
 -- ╔══════════════════════════════════════════╗
 -- ║   CORE JUMP FUNCTION                     ║
 -- ╚══════════════════════════════════════════╝
