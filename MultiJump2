@@ -8,7 +8,7 @@ local CONFIG = {
 	JumpPower      = 55,
 	ExtraJumpPower = 50,
 	JumpSoundId    = "rbxassetid://138963217663286",
-	RingImageId    = "rbxassetid://73061577156450",
+	RingImageId    = "rbxassetid://82148779521057",
 	HitRange       = 20,   -- must match JumpManager HitRange
 	PunchCooldown  = 0.5,
 	CameraShakeAmount = 0.18,
@@ -65,11 +65,12 @@ local Character    = script.Parent
 local Humanoid     = Character:WaitForChild("Humanoid")
 local HRP          = Character:WaitForChild("HumanoidRootPart")
 
-local maxJumps     = CONFIG.MinJumps
-local jumpsLeft    = maxJumps
-local isGrounded   = true
-local jumpCooldown = false
+local maxJumps      = CONFIG.MinJumps
+local jumpsLeft     = maxJumps
+local isGrounded    = true
+local jumpCooldown  = false
 local punchCooldown = false
+local isShielded    = false   -- toggled by ShieldStateChanged
 
 -- ╔══════════════════════════════════════════╗
 -- ║   CLEANUP FROM PREVIOUS LIFE             ║
@@ -260,10 +261,70 @@ end)
 local ShieldStateChanged = Remotes:WaitForChild("ShieldStateChanged", 10)
 if ShieldStateChanged then
 	ShieldStateChanged.OnClientEvent:Connect(function(targetPlayer, state, _value)
-		if targetPlayer == Player and state == "blocked" then
-			screenFlash(Color3.fromRGB(80, 160, 255))
-			shakeCamera(0.1, 0.06)
-			print("[MultiJump] Punch blocked by shield!")
+		if targetPlayer == Player then
+			if state == "on" then
+				isShielded = true
+			elseif state == "off" then
+				isShielded = false
+			elseif state == "blocked" then
+				-- Our punch hit a shield
+				screenFlash(Color3.fromRGB(80, 160, 255))
+				shakeCamera(0.1, 0.06)
+				print("[MultiJump] Punch blocked by shield!")
+			end
+		end
+
+		-- "Protected" label above the target player's head (visible to everyone)
+		local targetChar = targetPlayer.Character
+		if not targetChar then return end
+		local targetHRP  = targetChar:FindFirstChild("HumanoidRootPart")
+		if not targetHRP then return end
+
+		-- Remove any existing label first
+		local existing = targetHRP:FindFirstChild("ProtectedLabel")
+		if existing then existing:Destroy() end
+
+		if state == "on" then
+			local bb              = Instance.new("BillboardGui")
+			bb.Name               = "ProtectedLabel"
+			bb.Size               = UDim2.new(0, 120, 0, 30)
+			bb.StudsOffset        = Vector3.new(0, 3.5, 0)
+			bb.AlwaysOnTop        = false
+			bb.Adornee            = targetHRP
+			bb.Parent             = targetHRP
+
+			local bg              = Instance.new("Frame")
+			bg.Size               = UDim2.new(1, 0, 1, 0)
+			bg.BackgroundColor3   = Color3.fromRGB(20, 60, 140)
+			bg.BackgroundTransparency = 0.3
+			bg.BorderSizePixel    = 0
+			bg.Parent             = bb
+			Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 8)
+
+			local lbl             = Instance.new("TextLabel")
+			lbl.Size              = UDim2.new(1, 0, 1, 0)
+			lbl.BackgroundTransparency = 1
+			lbl.Text              = "🛡️ Protected"
+			lbl.TextColor3        = Color3.fromRGB(180, 220, 255)
+			lbl.TextScaled        = true
+			lbl.Font              = Enum.Font.GothamBold
+			lbl.Parent            = bg
+
+			-- Pulse animation so it's clearly visible
+			task.spawn(function()
+				while bb and bb.Parent do
+					TweenService:Create(lbl,
+						TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+						{ TextTransparency = 0.4 }
+					):Play()
+					task.wait(0.6)
+					TweenService:Create(lbl,
+						TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+						{ TextTransparency = 0 }
+					):Play()
+					task.wait(0.6)
+				end
+			end)
 		end
 	end)
 end
@@ -276,6 +337,8 @@ local function doJump()
 	if jumpCooldown then return end
 	if jumpsLeft <= 0 then return end
 	if Humanoid.Health <= 0 then return end
+	-- Shield: only first ground jump allowed, no air jumps
+	if isShielded and not isGrounded then return end
 
 	local currentJump = (maxJumps - jumpsLeft) + 1
 
@@ -315,6 +378,7 @@ end
 local function tryPunch()
 	if punchCooldown then return end
 	if Humanoid.Health <= 0 then return end
+	if isShielded then return end   -- can't steal while protected
 
 	punchCooldown = true
 	task.delay(CONFIG.PunchCooldown, function() punchCooldown = false end)
