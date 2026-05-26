@@ -44,8 +44,9 @@ local RequestHit         = makeRemote("RequestHit")
 local JumpCountChanged   = makeRemote("JumpCountChanged")
 local JumpCountBroadcast = makeRemote("JumpCountBroadcast")
 local GotHit             = makeRemote("GotHit")
-local RequestShield      = makeRemote("RequestShield")         -- client asks to activate shield
-local ShieldStateChanged = makeRemote("ShieldStateChanged")   -- server tells ALL clients shield state
+local RequestShield      = makeRemote("RequestShield")
+local ShieldStateChanged = makeRemote("ShieldStateChanged")
+local ShieldAbsorbed     = makeRemote("ShieldAbsorbed")   -- tells victim their shield blocked a hit
 
 print("[JumpManager] Remotes created OK")
 
@@ -202,8 +203,8 @@ RequestHit.OnServerEvent:Connect(function(attacker, targetPlayer)
 	-- Target is shielded — hit blocked
 	if isShielded(targetPlayer) then
 		print("[JumpManager] BLOCKED: target", targetPlayer.Name, "is shielded")
-		-- Tell attacker the hit was blocked (optional client feedback)
 		ShieldStateChanged:FireClient(attacker, "blocked", 0)
+		ShieldAbsorbed:FireClient(targetPlayer)   -- victim hears the block sound
 		return
 	end
 
